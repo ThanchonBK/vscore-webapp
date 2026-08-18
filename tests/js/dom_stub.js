@@ -45,4 +45,6 @@ function getComputedStyle(){ return {getPropertyValue:function(){return "white"}
 // defaults the real inputs would carry
 get("f-lo").value="0"; get("f-hi").value="99999";
 get("amp").value="1"; get("frm").value="10";
-get("f-ref").checked=true;   // matches the template default
+get("f-ref").checked=true;
+get("bonds").checked=true;
+get("axes").checked=true;
