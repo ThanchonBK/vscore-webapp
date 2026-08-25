@@ -5,7 +5,7 @@ mode, and watch any mode animate in 3D.
 
 Seven scores per mode: `s[Tx] s[Ty] s[Tz]` (translation), `s[Rx] s[Ry] s[Rz]`
 (rotation), `s[V_S]` (stretch character). Then a label — **S** stretching,
-**B** bending, **SB** mixed — with the largest |score| highlighted in each row.
+**B** bending — with the largest |score| highlighted in each row.
 
 The scoring core is a verbatim copy of the reference implementation in
 `../scoring-functions`. All 24 molecules with published results reproduce them
@@ -187,10 +187,13 @@ src/classifier.py                         app/core/classifier.py
 To re-sync after changing `src/`:
 
 ```bash
-cp src/{scoring,utils}.py vscore-webapp/app/core/
-cp data/results/thresholds.json vscore-webapp/app/core/
-# classifier.py needs the two import lines re-applied by hand
-cd vscore-webapp && .venv/bin/python -m pytest tests/ -q
+# run from this repo's root, with scoring-functions checked out alongside it
+cp ../scoring-functions/src/{scoring,utils,classifier}.py app/core/
+cp ../scoring-functions/data/results/thresholds.json app/core/
+# classifier.py needs its two webapp adaptations re-applied by hand:
+#   `from src.scoring import` -> `from .scoring import`
+#   DEFAULT_CALIBRATION_PATH -> os.path.join(os.path.dirname(__file__), "thresholds.json")
+.venv/bin/python -m pytest tests/ -q
 ```
 
 The test suite is what actually guards this: it compares every score and label
