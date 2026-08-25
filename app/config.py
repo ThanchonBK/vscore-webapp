@@ -19,11 +19,19 @@ TEMPLATES_DIR = APP_DIR / "templates"
 
 VERSION = "1.0"
 
-# Direct paste-in is a local convenience: it lets you try a few numbers without
-# writing a file. It is not offered on the public deployment, where an
-# open-ended textarea is a bigger surface than an upload for no gain. Vercel
-# sets VERCEL=1 in the function environment.
+# Vercel sets VERCEL=1 in the function environment; nothing else does.
 IS_LOCAL = not os.environ.get("VERCEL")
+
+# Direct paste-in -- and the in-browser builder that feeds it -- was local-only
+# until 2026-08-25: an open-ended textarea is a wider public surface than an
+# upload. Now offered on the deployment as well, by request. Set VSCORE_PASTE=0
+# in the environment to withdraw it again without shipping different code
+# (Vercel: Project Settings -> Environment Variables, then redeploy).
+#
+# The input is still validated exactly as before -- this widens who may reach
+# the parser, not what the parser accepts -- and _build() re-checks this flag
+# server-side, so hiding the tab is never the only thing standing in the way.
+ALLOW_PASTE = os.environ.get("VSCORE_PASTE", "1") != "0"
 
 
 def asset_version():

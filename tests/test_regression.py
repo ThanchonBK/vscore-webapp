@@ -856,12 +856,21 @@ def test_pasted_modes_are_scored():
     assert payload["source"] == "typed in"
 
 
-def test_pasted_modes_are_refused_off_a_local_instance(monkeypatch):
-    """The textarea is a local convenience; the public deployment takes files."""
+def test_pasted_modes_are_refused_when_the_flag_is_off(monkeypatch):
+    """Hiding the tab must never be the only thing stopping a paste: _build()
+    re-checks the flag, so a hand-made POST is refused too."""
     import app.main as main
-    monkeypatch.setattr(main, "IS_LOCAL", False)
-    with pytest.raises(ParseError, match="local instance only"):
+    monkeypatch.setattr(main, "ALLOW_PASTE", False)
+    with pytest.raises(ParseError, match="turned off on this instance"):
         main._build("paste", None, None, None, None, None, None, pasted=_PASTE)
+
+
+def test_pasted_modes_are_accepted_when_the_flag_is_on(monkeypatch):
+    """The default: paste-in is offered everywhere, deployment included."""
+    import app.main as main
+    monkeypatch.setattr(main, "ALLOW_PASTE", True)
+    payload, _ = main._build("paste", None, None, None, None, None, None, pasted=_PASTE)
+    assert payload["vibrations"], "the pasted modes must come back scored"
 
 
 def test_empty_paste_is_refused():
@@ -870,14 +879,19 @@ def test_empty_paste_is_refused():
         _build("paste", None, None, None, None, None, None, pasted="   \n ")
 
 
-def test_paste_tab_is_local_only():
+def test_paste_tab_is_behind_the_flag():
+    """Tab, panel and the builder script must all sit behind the same gate, or
+    the UI ends up half-present when it is switched off."""
     tpl = (ROOT / "app/templates/index.html").read_text()
     i = tpl.index('data-mode="paste"')
-    assert "{% if is_local %}" in tpl[:i][-200:], \
-        "the paste tab must be guarded by {% if is_local %}"
+    assert "{% if allow_paste %}" in tpl[:i][-200:], \
+        "the paste tab must be guarded by {% if allow_paste %}"
     j = tpl.index('id="p-paste"')
-    assert "{% if is_local %}" in tpl[:j][-300:], \
-        "the paste panel must be guarded by {% if is_local %}"
+    assert "{% if allow_paste %}" in tpl[:j][-300:], \
+        "the paste panel must be guarded by {% if allow_paste %}"
+    k = tpl.index("builder.js")
+    assert "{% if allow_paste %}" in tpl[:k][-200:], \
+        "the builder script must be guarded by {% if allow_paste %}"
 
 
 # ----------------------------------------------------------------------

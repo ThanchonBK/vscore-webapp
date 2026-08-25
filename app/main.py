@@ -22,7 +22,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from .config import (IS_LOCAL, MAX_UPLOAD_BYTES, SCORE_KEYS, SITE_NOTE,
+from .config import (ALLOW_PASTE, IS_LOCAL, MAX_UPLOAD_BYTES, SCORE_KEYS, SITE_NOTE,
                      STATIC_DIR, TEMPLATES_DIR, VERSION, asset_version)
 from .core.parsers import (ParseError, parse_connectivity, parse_gaussian_log,
                            parse_vsc, write_vsc)
@@ -40,6 +40,7 @@ templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 templates.env.globals["version"] = VERSION
 templates.env.globals["asset_v"] = asset_version
 templates.env.globals["is_local"] = IS_LOCAL
+templates.env.globals["allow_paste"] = ALLOW_PASTE
 templates.env.globals["site_note"] = SITE_NOTE
 templates.env.globals["score_keys"] = SCORE_KEYS
 
@@ -82,9 +83,9 @@ def _build(mode, log_text, com_text, vsc_text, log_name, com_name, vsc_name,
     downloaded .vsc re-scores to the same numbers as the files it came from.
     """
     if mode == "paste":
-        if not IS_LOCAL:
+        if not ALLOW_PASTE:
             raise ParseError(
-                "This page is available on a local instance only. Use the "
+                "Typed-in modes are turned off on this instance. Use the "
                 ".vsc upload above instead.")
         # Two ways in, one meaning: whatever arrives here is DECLARED to be a
         # selection of vibrations. mode_set is forced rather than detected, so

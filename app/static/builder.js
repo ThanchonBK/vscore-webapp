@@ -1,6 +1,7 @@
 /* builder.js -- type a molecule in field by field.
  *
- * Local-instance only (see config.IS_LOCAL). Builds a geometry grid, a bond
+ * Loaded only where paste-in is enabled (see config.ALLOW_PASTE). Builds a
+ * geometry grid, a bond
  * list and one displacement grid per mode, then assembles exactly the same
  * .vsc text the file upload would carry and posts it in the same field. The
  * server keeps a single parser; nothing here is a second definition of the

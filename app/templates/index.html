@@ -22,7 +22,7 @@
     <div class="tabs" role="tablist">
       <button type="button" class="tab on" data-mode="log" role="tab">Gaussian .log + .com</button>
       <button type="button" class="tab" data-mode="vsc" role="tab">Single .vsc file</button>
-      {% if is_local %}
+      {% if allow_paste %}
       <button type="button" class="tab" data-mode="paste" role="tab">Arbitrary vibrations</button>
       {% endif %}
     </div>
@@ -71,7 +71,7 @@
       </p>
     </section>
 
-    {% if is_local %}
+    {% if allow_paste %}
     <section class="panel" id="p-paste">
       <p class="assume">
         <b>Every mode on this page is taken to be a vibration</b> &mdash; not a
@@ -115,8 +115,8 @@
       <textarea name="pasted" id="pasted" hidden></textarea>
 
       <p class="note local">
-        Local instance only. Blank number fields are read as 0. If a file is
-        uploaded it takes precedence over anything typed.
+        Blank number fields are read as 0. If a file is uploaded it takes
+        precedence over anything typed.
       </p>
     </section>
     {% endif %}
@@ -170,7 +170,7 @@
 {% endblock %}
 
 {% block page_scripts %}
-{% if is_local %}
+{% if allow_paste %}
 <script src="/static/3Dmol-min.js"></script>
 <script src="/static/builder.js?v={{ asset_v() }}"></script>
 {% endif %}
