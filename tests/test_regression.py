@@ -78,7 +78,13 @@ def test_matches_reference(stem, log, com, csv_path):
             assert abs(float(expected[col]) - got["scores"][col]) < 5e-4, \
                 f"{stem} {got['name']} {col}"
         assert abs(float(expected["V_Stretch"]) - got["scores"]["V_S"]) < 5e-4
-        assert expected["label"] == got["label"], f"{stem} {got['name']} label"
+        # ext_label, not label: reproducing the reference implementation is a
+        # claim about the CLASSIFIER's verdict, which ext_label carries
+        # verbatim. `label` is the stretch/bend view the UI shows before any
+        # T/R candidate is accepted -- a presentation choice made here, and
+        # never something scoring-functions published.
+        assert expected["label"] == got["ext_label"], \
+            f"{stem} {got['name']} label"
 
 
 @pytest.mark.parametrize("stem,log,com,csv_path", molecules(),
@@ -393,7 +399,7 @@ def test_emit_vsc_matches_reference():
             assert abs(float(expected[col]) - got["scores"][col]) < 5e-4, \
                 f"{got['name']} {col}"
         assert abs(float(expected["V_Stretch"]) - got["scores"]["V_S"]) < 5e-4
-        assert expected["label"] == got["label"], f"{got['name']}"
+        assert expected["label"] == got["ext_label"], f"{got['name']}"
 
     # A real EMIT eigenvector must be able to win a slot outright (not just
     # "*"-mixed) and be highlighted on that slot rather than V_S -- this is
@@ -401,8 +407,12 @@ def test_emit_vsc_matches_reference():
     clean_externals = [r for r in payload["vibrations"] if r["is_reference"]]
     assert clean_externals, "expected at least one EMIT mode to cleanly win a T/R slot"
     for r in clean_externals:
-        assert r["highlight"] == r["label"], f"{r['name']}: {r['highlight']} != {r['label']}"
-        assert r["highlight"] != "V_S"
+        assert r["ext_highlight"] == r["ext_label"], \
+            f"{r['name']}: {r['ext_highlight']} != {r['ext_label']}"
+        assert r["ext_highlight"] != "V_S"
+        # ...and by default the same mode reads as a stretch or a bend,
+        # which is the whole point for EMIT: no rigid-body modes exist.
+        assert r["label"] in ("S", "B")
 
 
 @pytest.mark.skipif(not _emit_vsc_path().exists(), reason="C6H6_EMIT.vsc not present")
@@ -505,13 +515,17 @@ def test_3n_finds_the_six_TR_modes_without_constructing_any():
 
     assert p["references"] == [], "3N must not construct reference modes"
     assert p["n_modes"] == 3 * len(g["atoms"])
-    ext = [r for r in p["vibrations"] if r["label"][0] in "TR"]
+    ext = [r for r in p["vibrations"] if r["ext_label"][0] in "TR"]
     assert len(ext) == 6, f"{len(ext)} external slots filled, expected 6"
     # the six supplied T/R modes are the ones claimed, and cleanly
     assert [r["name"] for r in ext] == [f"Vib {i}" for i in range(1, 7)]
-    assert all(not r["label"].endswith("*") for r in ext), \
+    assert all(not r["ext_label"].endswith("*") for r in ext), \
         "a clean 3N set should not need starred externals"
-    assert {r["label"] for r in ext} == {"Tx", "Ty", "Tz", "Rx", "Ry", "Rz"}
+    assert {r["ext_label"] for r in ext} == {"Tx", "Ty", "Tz", "Rx", "Ry", "Rz"}
+    # They are offered as candidates, not imposed: the default view still
+    # calls every one of them a stretch or a bend.
+    assert {c["slot"] for c in p["candidates"]} == {"Tx", "Ty", "Tz", "Rx", "Ry", "Rz"}
+    assert all(r["label"] in ("S", "B") for r in ext)
     assert p["warnings"] == []
 
 
@@ -521,11 +535,12 @@ def test_3n_and_3n6_agree_on_the_real_vibrations():
     a = analyse(g["atoms"], g["coords"], bonds, g["modes"], mode_set="3n-6")
     coords, modes = _complete_3n(g, bonds)
     c = analyse(g["atoms"], coords, bonds, modes, mode_set="3n")
-    vib = [r for r in c["vibrations"] if r["label"][0] not in "TR"]
+    vib = [r for r in c["vibrations"] if r["ext_label"][0] not in "TR"]
 
     assert len(vib) == len(a["vibrations"])
     for x, y in zip(a["vibrations"], vib):
         assert x["label"] == y["label"]
+        assert x["ext_label"] == y["ext_label"]
         assert x["frequency"] == pytest.approx(y["frequency"], abs=1e-3)
         # magnitudes only: re-aligning an already-principal geometry can flip
         # axis signs (MIT is not idempotent), which is a frame convention and
@@ -550,7 +565,7 @@ def test_3n_recovery_degrades_off_principal_axes():
     modes += [{"frequency": m["frequency"], "vector": m["vector"]} for m in g["modes"]]
 
     p = analyse(g["atoms"], g["coords"], bonds, modes, mode_set="3n")
-    ext = [r["name"] for r in p["vibrations"] if r["label"][0] in "TR"]
+    ext = [r["name"] for r in p["vibrations"] if r["ext_label"][0] in "TR"]
     assert ext != [f"Vib {i}" for i in range(1, 7)], (
         "off-axis T/R now recovers perfectly; the 3N warning text and this "
         "test's rationale should be revisited")
@@ -966,3 +981,107 @@ def test_arbitrary_reports_no_reference_rows():
             assert x["scores"][k] == pytest.approx(y["scores"][k], abs=1e-12)
     # and no supplied mode may hold an external slot
     assert all(r["label"] in ("S", "B", "SB") for r in arb["vibrations"])
+
+
+# ----------------------------------------------------------------------
+# T/R candidates: every mode gets S/B, the assignment's picks are offered
+# separately, and accepting them reproduces the classifier exactly.
+# ----------------------------------------------------------------------
+
+def _emit_payload():
+    from app.core.parsers import parse_vsc
+    text = (ROOT / "examples/C6H6_EMIT.vsc").read_text()
+    g = parse_vsc(text)
+    return analyse(g["atoms"], g["coords"], g["bonds"], g["modes"],
+                   title="C6H6_EMIT", mode_set="auto")
+
+
+def test_every_mode_gets_a_stretch_or_bend_label():
+    """The default view answers the question that is always answerable."""
+    p = _emit_payload()
+    assert p["vibrations"]
+    for r in p["vibrations"]:
+        assert r["label"] in ("S", "B"), f"{r['name']} -> {r['label']}"
+
+
+def test_candidates_are_the_assignments_the_classifier_made():
+    """Held aside, not invented: every candidate is a mode the classifier gave
+    an external label, and no mode with such a label is missing from the list."""
+    p = _emit_payload()
+    by_index = {c["mode_index"]: c for c in p["candidates"]}
+    assert by_index, "EMIT must still produce slot picks"
+    for r in p["vibrations"]:
+        external = r["ext_label"][0] in "TR"
+        assert (r["index"] in by_index) == external, \
+            f"{r['name']}: ext_label {r['ext_label']} vs candidate listing"
+        if external:
+            c = by_index[r["index"]]
+            assert c["label"] == r["ext_label"]
+            assert c["slot"] == r["ext_label"].rstrip("*")
+            # confidence is that slot's own score magnitude
+            assert c["confidence"] == pytest.approx(abs(r["scores"][c["slot"]]), abs=5e-4)
+            assert 0.0 <= c["confidence"] <= 1.0 + 1e-9
+
+
+def test_one_candidate_per_slot_at_most():
+    """The assignment is one-to-one, so a slot cannot be claimed twice."""
+    p = _emit_payload()
+    slots = [c["slot"] for c in p["candidates"]]
+    assert len(slots) == len(set(slots)), slots
+
+
+def test_constructed_references_are_never_candidates():
+    """A 3N-6 set constructs the ideal T/R modes, which exist to win the slots.
+    Offering them as candidates would be circular -- and would imply the user's
+    own modes had been passed over."""
+    from app.core.parsers import parse_vsc
+    g = parse_vsc((ROOT / "examples/C6H6.vsc").read_text())
+    p = analyse(g["atoms"], g["coords"], g["bonds"], g["modes"], title="C6H6",
+                mode_set="auto")
+    assert p["references"], "expected constructed references on a 3N-6 set"
+    assert p["candidates"] == []
+    # the references keep their own T/R labels; only real modes are re-viewed
+    for r in p["references"]:
+        assert r["label"][0] in "TR", f"reference relabelled {r['label']}"
+
+
+def test_accepting_a_starred_candidate_carries_its_annotation():
+    """A candidate that failed the purity gate is part vibration, and saying so
+    is the whole content of the star. The annotation must survive into the
+    accepted view -- and must be absent from the default one, where there is no
+    external label for it to qualify.
+
+    (That ext_label reproduces the reference implementation itself is covered
+    across 24 molecules by test_matches_reference.)
+    """
+    p = _emit_payload()
+    starred = [r for r in p["vibrations"] if r["ext_label"].endswith("*")]
+    assert starred, "EMIT is expected to produce mixed externals"
+    for r in starred:
+        assert r["ext_annotation"].startswith("vibration="), r["ext_annotation"]
+        assert r["ext_annotation"].split("=")[1] == r["label"], \
+            "the star's vibration sub-label is the same S/B the default view shows"
+        assert r["annotation"] == "", "no annotation without an external label"
+        # a mixed external is part rigid-body, part vibration, so the accepted
+        # view marks both numbers; the default view marks only V_S
+        assert r["highlights"] == ["V_S"]
+        assert len(r["ext_highlights"]) == 2 and "V_S" in r["ext_highlights"]
+
+
+def test_csv_export_follows_the_view_and_says_which_one():
+    """A saved CSV must not be ambiguous about which view produced it."""
+    from app.core.pipeline import to_csv_rows
+    p = _emit_payload()
+    plain = to_csv_rows(p)
+    ext = to_csv_rows(p, incorporate=True)
+    assert [r["label"] for r in plain] != [r["label"] for r in ext], \
+        "the two views must differ on an EMIT set"
+    assert all(r["label"] in ("S", "B") for r in plain)
+    assert all(r["tr_candidates_incorporated"] is False for r in plain)
+    assert all(r["tr_candidates_incorporated"] is True for r in ext)
+    # the candidate columns ride along in BOTH, so neither file loses the
+    # information the other one shows
+    picked = [r for r in plain if r["tr_candidate_slot"]]
+    assert len(picked) == len(p["candidates"])
+    for r in picked:
+        assert 0.0 <= r["tr_candidate_confidence"] <= 1.0

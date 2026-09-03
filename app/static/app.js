@@ -19,6 +19,21 @@
   var picked = [];             // mode indices ticked for comparison, max 3
   var sortKey = null, sortDir = 0;   // 0 = file order, 1 = ascending, -1 = descending
   var selectedBond = null;           // index into P.bonds, highlighted both ways
+  /* Whether the user has accepted the T/R candidates (see candidates.py).
+   * false: every mode reads as a stretch or a bend, and the six slot picks
+   * are only listed in their own table. true: the picks are folded back in
+   * and read exactly as the classifier labelled them, "Tx" or "Tx*".
+   * Default false -- the candidates are a claim about the mode set, and on an
+   * EMIT basis there are no rigid-body modes for them to be true of. */
+  var useExt = false;
+
+  /* The active view's fields for a row. Every consumer goes through these, so
+   * the table, the viewer caption, the compare panel and the chips can never
+   * disagree about which view is showing. */
+  function labOf(r)   { return useExt ? r.ext_label : r.label; }
+  function labTxt(r)  { return useExt ? r.ext_label_text : r.label_text; }
+  function annOf(r)   { return useExt ? r.ext_annotation : r.annotation; }
+  function hotOf(r)   { return useExt ? r.ext_highlights : r.highlights; }
   var BOND_HL = "#f2c14e";
   var cmpViews = [];           // one live 3Dmol viewer per compared mode
   var MAX_CMP = 3;
@@ -48,7 +63,7 @@
     // not a solution of the Hessian -- so it must sort as missing too, or it
     // lands among the lowest frequencies.
     if (key === "freq") return r.is_reference ? null : r.frequency;
-    if (key === "label") return r.label;
+    if (key === "label") return labOf(r);
     if (key === "irrep") return r.irrep;
     return r.scores[key];
   }
@@ -201,8 +216,9 @@
       if (!isNaN(lo) && r.frequency < lo) return false;
       if (!isNaN(hi) && r.frequency > hi) return false;
     }
-    if (["S", "B", "SB"].indexOf(r.label) !== -1) {
-      return document.getElementById("f-" + r.label).checked;
+    var lab = labOf(r);
+    if (["S", "B", "SB"].indexOf(lab) !== -1) {
+      return document.getElementById("f-" + lab).checked;
     }
     return true;                       // external labels are not label-filtered
   }
@@ -242,7 +258,7 @@
         // r.highlights follows the LABEL: one cell for a clean external or an
         // internal mode, two for a mixed external (V_S + the largest |T/R|),
         // which by definition is part vibration and part rigid-body motion.
-        if (r.highlights.indexOf(k) !== -1) cls += " hot";
+        if (hotOf(r).indexOf(k) !== -1) cls += " hot";
         else if (!r.is_reference && k !== "V_S") cls += " dim";
         cells += '<td class="' + cls + '">' + fmt(r.scores[k]) + "</td>";
       });
@@ -250,12 +266,13 @@
       // annotation="vibration=SB". Show that as a second chip rather than
       // spelling it out: [Tx*] [SB].
       var ann = "";
-      if (r.annotation) {
-        var vm = /^vibration=(\w+)$/.exec(r.annotation);
+      if (annOf(r)) {
+        var vm = /^vibration=(\w+)$/.exec(annOf(r));
         ann = vm ? '<b class="lab ' + vm[1] + '">' + vm[1] + "</b>"
-                 : '<span class="ann">' + r.annotation + "</span>";
+                 : '<span class="ann">' + annOf(r) + "</span>";
       }
-      cells += '<td><b class="lab ' + r.label.replace("*", "x") + '">' + r.label + "</b>" +
+      var lb = labOf(r);
+      cells += '<td><b class="lab ' + lb.replace("*", "x") + '">' + lb + "</b>" +
                ann + "</td>" +
                "<td>" + (r.irrep || "—") + "</td>";
       tr.innerHTML = cells;
@@ -331,7 +348,7 @@
       h += "</tr>";
     });
     h += "<tr><td>label</td>";
-    rows.forEach(function (r) { h += "<td>" + r.label + "</td>"; });
+    rows.forEach(function (r) { h += "<td>" + labOf(r) + "</td>"; });
     h += "</tr><tr><td>" + (P.is_emit ? "eigenvalue" : "ν / cm⁻¹") + "</td>";
     rows.forEach(function (r) {
       h += "<td>" + (r.frequency === null ? "—" : r.frequency.toFixed(2)) + "</td>";
@@ -502,8 +519,8 @@
       c.card.querySelector(".vh").innerHTML =
         swatch(k) + "<b>" + r.name + "</b>" +
         '<span class="muted">' + freq + "</span>" +
-        '<span class="sp"></span><b class="lab ' + r.label.replace("*", "x") +
-        '">' + r.label + "</b>";
+        '<span class="sp"></span><b class="lab ' + labOf(r).replace("*", "x") +
+        '">' + labOf(r) + "</b>";
       // The canvas was sized while the card was hidden (display:none -> 0x0),
       // and the grid width changes with the number of modes shown, so the
       // viewer must be told its box again or it draws into a stale buffer --
@@ -535,8 +552,8 @@
       r.name + (r.frequency !== null && r.frequency !== 0
                 ? "  ·  " + r.frequency.toFixed(1) + " cm⁻¹" : "");
     var lb = document.getElementById("vlabel");
-    lb.textContent = r.label + " — " + r.label_text;
-    lb.className = "lab " + r.label.replace("*", "x");
+    lb.textContent = labOf(r) + " — " + labTxt(r);
+    lb.className = "lab " + labOf(r).replace("*", "x");
 
     renderBondPanel(r);
     draw(r);
@@ -836,6 +853,9 @@
   var DL = JSON.parse(document.getElementById("downloads").textContent);
 
   function download(key, name, mime) {
+    // The CSVs exist in both views; take the one on screen, so a saved file
+    // always matches the table it was saved from. The .vsc has only one form.
+    if (useExt && DL[key + "_ext"]) key = key + "_ext";
     var blob = new Blob([DL[key]], { type: mime });
     var a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
@@ -859,6 +879,35 @@
   ["f-S", "f-B", "f-SB", "f-ref"].forEach(function (id) {
     var el = document.getElementById(id);
     if (el) el.addEventListener("change", render);   // f-ref absent under 3N
+  });
+
+  /* Accepting or rejecting the T/R candidates switches which view every label
+   * comes from. Nothing is re-scored -- both views were computed server-side
+   * and travel in the same payload -- so this only repaints. */
+  var acc = document.getElementById("use-ext");
+  if (acc) {
+    acc.addEventListener("change", function () {
+      useExt = acc.checked;
+      var box = document.getElementById("cands");
+      if (box) box.classList.toggle("on", useExt);
+      render();
+      var r = selected === null ? null : byIndex(selected);
+      if (r) {                                  // repaint the viewer caption
+        var lb = document.getElementById("vlabel");
+        lb.textContent = labOf(r) + " \u2014 " + labTxt(r);
+        lb.className = "lab " + labOf(r).replace("*", "x");
+      }
+      if (picked.length >= 2) renderCompare();  // and the compare tables
+    });
+  }
+
+  /* Clicking a candidate row selects that mode in the table and viewer, so the
+   * two tables are navigable as one. */
+  document.querySelectorAll("#cands tr[data-mode]").forEach(function (tr) {
+    tr.addEventListener("click", function () {
+      var r = byIndex(parseInt(tr.dataset.mode, 10));
+      if (r) show(r);
+    });
   });
   ["f-lo", "f-hi"].forEach(function (id) {
     document.getElementById(id).addEventListener("input", render);

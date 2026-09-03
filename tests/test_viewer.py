@@ -398,26 +398,51 @@ def _payload_with_mixed_externals():
     return analyse(g["atoms"], g["coords"], bonds, modes, mode_set="3n")
 
 
-def test_starred_external_shows_a_second_label_chip(tmp_path):
-    """A mixed external renders as two chips, e.g. [Tx*][SB] -- not as the raw
-    annotation text "vibration=SB"."""
+_CHIPS = """
+    function chips() {
+      var out = [];
+      document.querySelectorAll('#tbl tbody tr').forEach(function (tr) {
+        var cell = (tr.innerHTML.match(/<td>(<b class="lab[\\s\\S]*?)<\\/td>/) || [])[1] || '';
+        var cs = (cell.match(/<b class="lab [^"]*">([^<]*)<\\/b>/g) || [])
+                  .map(function (c) { return c.replace(/<[^>]*>/g, ''); });
+        out.push({chips: cs, raw: cell});
+      });
+      return out;
+    }
+"""
+
+
+def test_candidates_are_not_labelled_TR_until_accepted(tmp_path):
+    """The default view calls every mode a stretch or a bend, even the ones the
+    assignment picked for a slot -- that is the point of holding them back."""
     pay = _payload_with_mixed_externals()
-    assert any(r["label"].endswith("*") for r in pay["vibrations"]), \
+    assert any(r["ext_label"].endswith("*") for r in pay["vibrations"]), \
         "test setup produced no mixed external"
-    _, got = _run_js(None, tmp_path, """
-        var out = [];
-        document.querySelectorAll('#tbl tbody tr').forEach(function (tr) {
-            var cell = (tr.innerHTML.match(/<td>(<b class="lab[\\s\\S]*?)<\\/td>/) || [])[1] || '';
-            var chips = (cell.match(/<b class="lab [^"]*">([^<]*)<\\/b>/g) || [])
-                        .map(function (c) { return c.replace(/<[^>]*>/g, ''); });
-            out.push({chips: chips, raw: cell});
-        });
-        print(JSON.stringify(out));
+    _, got = _run_js(None, tmp_path, _CHIPS + "print(JSON.stringify(chips()));",
+                     payload=pay)
+    rows = json.loads(got)
+    assert rows
+    for r in rows:
+        if not r["chips"]:
+            continue
+        assert len(r["chips"]) == 1, f"one chip per row before accepting: {r['chips']}"
+        assert r["chips"][0] in ("S", "B", "SB"), r["chips"]
+        assert "vibration=" not in r["raw"]
+
+
+def test_starred_external_shows_a_second_label_chip(tmp_path):
+    """Once accepted, a mixed external renders as two chips, e.g. [Tx*][SB] --
+    not as the raw annotation text "vibration=SB"."""
+    pay = _payload_with_mixed_externals()
+    _, got = _run_js(None, tmp_path, _CHIPS + """
+        var t = document.getElementById('use-ext');
+        t.checked = true; t.fire('change');
+        print(JSON.stringify(chips()));
     """, payload=pay)
     rows = json.loads(got)
     assert rows
     starred = [r for r in rows if r["chips"] and r["chips"][0].endswith("*")]
-    assert starred, "no mixed external rendered"
+    assert starred, "no mixed external rendered after accepting the candidates"
     for r in starred:
         assert len(r["chips"]) == 2, f"expected two chips, got {r['chips']}"
         assert r["chips"][1] in ("S", "B", "SB"), r["chips"]
@@ -425,6 +450,24 @@ def test_starred_external_shows_a_second_label_chip(tmp_path):
     for r in rows:
         if r["chips"] and not r["chips"][0].endswith("*"):
             assert len(r["chips"]) == 1, f"unstarred row got {r['chips']}"
+
+
+def test_accepting_candidates_is_reversible(tmp_path):
+    """Switching back must restore the stretch/bend view exactly -- the toggle
+    is a view, so nothing may be lost by flipping it."""
+    pay = _payload_with_mixed_externals()
+    _, got = _run_js(None, tmp_path, _CHIPS + """
+        var before = JSON.stringify(chips());
+        var t = document.getElementById('use-ext');
+        t.checked = true;  t.fire('change');
+        var during = JSON.stringify(chips());
+        t.checked = false; t.fire('change');
+        print(JSON.stringify({same: before === JSON.stringify(chips()),
+                              changed: before !== during}));
+    """, payload=pay)
+    r = json.loads(got)
+    assert r["changed"], "accepting the candidates must change the table"
+    assert r["same"], "rejecting them again must restore it exactly"
 
 
 def test_3n_hides_the_reference_toggle_and_js_survives_it(tmp_path):

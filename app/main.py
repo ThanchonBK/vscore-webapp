@@ -141,8 +141,8 @@ def _stem(name):
     return name.rsplit("/", 1)[-1].rsplit(".", 1)[0]
 
 
-def _csv_text(payload, include_references=False):
-    rows = to_csv_rows(payload, include_references)
+def _csv_text(payload, include_references=False, incorporate=False):
+    rows = to_csv_rows(payload, include_references, incorporate)
     if not rows:
         return ""
     buf = io.StringIO()
@@ -208,9 +208,15 @@ async def score(
     return templates.TemplateResponse(request, "result.html", {
         "p": payload,
         "payload_json": _embed(payload),
+        # Both views are shipped so the download follows the toggle without a
+        # round trip. The .vsc has no view: it serialises the INPUT (geometry,
+        # connectivity, modes), which no labelling decision touches.
         "downloads_json": _embed({
             "csv": _csv_text(payload),
             "csvall": _csv_text(payload, include_references=True),
+            "csv_ext": _csv_text(payload, incorporate=True),
+            "csvall_ext": _csv_text(payload, include_references=True,
+                                    incorporate=True),
             "vsc": _vsc_text(payload, raw),
         }),
     })

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import numpy as np
 
+from .candidates import split_views
 from .classifier import Thresholds, classify_all_modes, is_linear
 from .parsers import ParseError, displacement_precision
 from .scoring import ModeScorer
@@ -155,6 +156,11 @@ def analyse(atoms, coords, bonds, modes, title="", source="", warnings=None,
         n_ref = len(scorer.construct_T()) + len(ideal_R)
 
     scored = classify_all_modes(scorer, final, thresholds)
+    # Split the classifier's single verdict into the two views the UI offers:
+    # a stretch/bend label on EVERY mode, and the external assignment's picks
+    # held aside as candidates. Neither re-runs the classifier -- see
+    # candidates.py for why the two are worth separating.
+    candidates = split_views(scored, thresholds)
     # classify_all_modes returns one entry per mode in `final`, in the same
     # order, but drops the displacement vector -- the viewer needs it, so pair
     # them back up here rather than re-deriving.
@@ -162,6 +168,7 @@ def analyse(atoms, coords, bonds, modes, title="", source="", warnings=None,
     # slot every time -- 0/463 counterexamples). Under 3N nothing is
     # constructed, so the CLASSIFICATION is what says a mode is external.
     rows = [_row(m, vec["vector"], i,
+                 constructed=bool(n_ref) and i < n_ref,
                  is_reference=(i < n_ref if n_ref
                                else m["classification"] in _EXTERNAL_SLOTS),
                  # the SET-level flag, not the per-mode one: is_emit decides
@@ -193,8 +200,11 @@ def analyse(atoms, coords, bonds, modes, title="", source="", warnings=None,
             "rotation — each is classified on its own s[V_S].")
 
     if mode_set == "3n":
-        starred = [r for r in vibrations if r["label"].endswith("*")]
-        assigned = [r for r in vibrations if r["label"][0] in "TR"]
+        # Read the CLASSIFIER's verdict, not the displayed label: the default
+        # view now calls every mode a stretch or a bend, so counting "TR" in
+        # `label` would report zero assigned slots on a perfectly good 3N set.
+        starred = [r for r in vibrations if r["ext_label"].endswith("*")]
+        assigned = [r for r in vibrations if r["ext_label"][0] in "TR"]
         if starred:
             # Not a fault: a starred label is the algorithm reporting that the
             # mode is genuinely part rigid-body motion and part vibration.
@@ -202,7 +212,7 @@ def analyse(atoms, coords, bonds, modes, title="", source="", warnings=None,
             notes.append(
                 f"{len(starred)} mixed external"
                 + ("s" if len(starred) > 1 else "") + ": "
-                + ", ".join(f"{r['name']} {r['label']}" for r in starred)
+                + ", ".join(f"{r['name']} {r['ext_label']}" for r in starred)
                 + ". Each is part rigid-body motion, part vibration — both its "
                   "V_S and its largest T/R score are highlighted.")
         if len(assigned) < n_ext:
@@ -236,6 +246,11 @@ def analyse(atoms, coords, bonds, modes, title="", source="", warnings=None,
         "frame_rotation_deg": frame_rotation,
         "vibrations": vibrations,
         "references": references,
+        # The external assignment's picks, held aside. Constructed T/R
+        # references are dropped: they exist precisely to win these slots, so
+        # listing them as "candidates" would be circular -- the question is
+        # only ever which of the USER's modes look external.
+        "candidates": [c for c in candidates if c["mode_index"] >= n_ref],
         "thresholds": {
             "tau_TR": thresholds.tau_TR,
             "tau_S": thresholds.tau_S,
@@ -256,7 +271,7 @@ def analyse(atoms, coords, bonds, modes, title="", source="", warnings=None,
     }
 
 
-def _row(m, vector, index, is_reference=False, is_emit=False):
+def _row(m, vector, index, is_reference=False, is_emit=False, constructed=False):
     """One table row: the seven scores, the label, and which score dominates."""
     scores = {
         "Tx": m["T"]["x"], "Ty": m["T"]["y"], "Tz": m["T"]["z"],
@@ -268,7 +283,18 @@ def _row(m, vector, index, is_reference=False, is_emit=False):
     # -0.283. A mode translating along -x is as translational as one along +x.
     dominant = max(SCORE_KEYS, key=lambda k: abs(scores[k]))
 
-    label = m["classification"]
+    # Two views of the same mode (see candidates.py):
+    #   label     -- the stretch/bend one, true of every mode, shown by default
+    #   ext_label -- the classifier's own verdict, shown when the user accepts
+    #                this mode's T/R candidacy. Identical to `label` for a mode
+    #                that never took a slot.
+    # A CONSTRUCTED ideal T/R reference is a rigid-body motion by definition --
+    # it exists only to occupy an external slot -- so calling it a stretch or a
+    # bend would be false. It keeps the classifier's label in both views; the
+    # split applies to the user's own modes, which are what the question is
+    # about.
+    label = m["classification"] if constructed else m["sb_label"]
+    ext_label = m["classification"]
 
     # What the UI highlights follows the LABEL, not the raw abs-max, because
     # the label is what the algorithm actually concluded:
@@ -285,14 +311,19 @@ def _row(m, vector, index, is_reference=False, is_emit=False):
     #                               it is genuinely part external and part
     #                               vibration, so one number cannot describe it.
     _TR = tuple(k for k in SCORE_KEYS if k != "V_S")
-    is_external = label[0] in "TR"
-    if is_external and label.endswith("*"):
-        highlights = ["V_S", max(_TR, key=lambda k: abs(scores[k]))]
-    elif is_external:
-        highlights = [label]
-    else:
-        highlights = ["V_S"]
+
+    def _highlights_for(lab):
+        is_external = lab[0] in "TR"
+        if is_external and lab.endswith("*"):
+            return ["V_S", max(_TR, key=lambda k: abs(scores[k]))]
+        if is_external:
+            return [lab]
+        return ["V_S"]
+
+    # The default view labels every mode from s[V_S], so that is what it marks.
+    highlights = _highlights_for(label)
     highlight = highlights[0]
+    ext_highlights = _highlights_for(ext_label)
     return {
         "index": index,
         "name": m["name"],
@@ -306,7 +337,15 @@ def _row(m, vector, index, is_reference=False, is_emit=False):
         "dominant_value": round(float(scores[dominant]), 4),
         "label": label,
         "label_text": _label_text(label),
-        "annotation": m["annotation"],
+        # Empty in the default view: the annotation only ever qualified an
+        # external label, and there is none to qualify until one is accepted.
+        "annotation": "",
+        "ext_label": ext_label,
+        "ext_label_text": _label_text(ext_label),
+        "ext_annotation": m["annotation"],
+        "ext_highlight": ext_highlights[0],
+        "ext_highlights": ext_highlights,
+        "candidate": m["candidate"],
         "irrep": m["irrep"],
         "reduced_mass": _num(m["reduced_mass"]),
         "force_constant": _num(m["force_constant"]),
@@ -339,7 +378,7 @@ def _freq_range(rows):
     return [float(min(freqs)), float(max(freqs))]
 
 
-def to_csv_rows(payload, include_references=False):
+def to_csv_rows(payload, include_references=False, incorporate=False):
     """Flatten to CSV rows in the same shape as the reference implementation's
     ``classify_to_rows`` output, so a download drops straight into the existing
     analysis (one ``s_AB[X#-Y#]`` column per bond)."""
@@ -354,14 +393,24 @@ def to_csv_rows(payload, include_references=False):
             "Rx": r["scores"]["Rx"], "Ry": r["scores"]["Ry"], "Rz": r["scores"]["Rz"],
             "V_Stretch": r["scores"]["V_S"],
             "Mu": r["reduced_mass"], "K": r["force_constant"], "Irrep": r["irrep"],
-            "label": r["label"],
-            "annotation": r["annotation"],
+            "label": r["ext_label"] if incorporate else r["label"],
+            "annotation": r["ext_annotation"] if incorporate else r["annotation"],
+            # Which view produced this file, recorded per row so a saved CSV
+            # cannot later be mistaken for the other one. With this False, a
+            # T/R candidate is reported in the two columns below and NOT in
+            # the label; with it True the label is the classifier's verdict.
+            "tr_candidates_incorporated": bool(incorporate),
+            "tr_candidate_slot": (r["candidate"] or {}).get("slot"),
+            "tr_candidate_confidence": (
+                round((r["candidate"] or {}).get("confidence"), 4)
+                if r["candidate"] else None),
             # highlighted_score is what the table marks: the dominant score on a
             # constructed T/R reference, and always V_S on a real vibration.
             # dominant_score is the raw abs-max across all seven, kept because it
             # is a real diagnostic -- but it is NOT a claim of external character
             # (no real vibration is ever assigned a T/R slot).
-            "highlighted_score": "+".join(r["highlights"]),
+            "highlighted_score": "+".join(
+                r["ext_highlights"] if incorporate else r["highlights"]),
             "dominant_score": r["dominant"],
             "is_reference_mode": r["is_reference"],
         }

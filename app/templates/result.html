@@ -39,6 +39,39 @@
   <span class="bk right">from {{ p.source or "your upload" }} — not inferred</span>
 </div>
 
+{% if p.candidates %}
+<section class="cands" id="cands">
+  <div class="ch">
+    <b>T/R candidates</b>
+    <span class="muted">{{ p.candidates|length }} of your modes best match a rigid-body
+      slot. Listed here rather than in the table because whether they ARE
+      translations and rotations depends on your mode set — on an EMIT basis
+      there are none, and these are modes carrying the most T/R character.</span>
+  </div>
+  <table>
+    <tr><th>mode</th><th>slot</th><th>confidence</th><th>purity</th><th>if accepted</th></tr>
+    {% for c in p.candidates %}
+    <tr data-mode="{{ c.mode_index }}">
+      <td class="mode">{{ c.name }}</td>
+      <td><b class="lab {{ c.slot }}">{{ c.kind }}<sub>{{ c.axis }}</sub></b></td>
+      <td class="n">
+        <span class="cbar"><i style="width:{{ (c.confidence * 100)|round(1) }}%"></i></span>
+        {{ "%.3f"|format(c.confidence) }}
+      </td>
+      <td>{% if c.clean %}<span class="ok">passed both gates</span>
+          {% else %}<span class="part">part vibration</span>{% endif %}</td>
+      <td><b class="lab {{ c.label|replace('*','x') }}">{{ c.label }}</b></td>
+    </tr>
+    {% endfor %}
+  </table>
+  <label class="acc">
+    <input type="checkbox" id="use-ext">
+    Treat these as real T/R modes and fold them into the table
+    <span class="muted">— off: every mode is scored as a stretch or a bend.</span>
+  </label>
+</section>
+{% endif %}
+
 <div class="split">
 
   <!-- ------------------------------------------------ table ------- -->
