@@ -280,6 +280,7 @@
       tr.addEventListener("click", function (e) {
         if (e.target.classList.contains("pick")) return;
         show(r);
+        revealViewer();
       });
       var cb = tr.querySelector(".pick");
       if (cb) cb.addEventListener("change", function () { togglePick(r.index, cb); });
@@ -542,6 +543,31 @@
 
   // --------------------------------------------------------------- viewer
   function elementColor() { return null; }   // let 3Dmol use its element palette
+
+  /* Bring the 3D viewer into view after a mode is picked from a table.
+   *
+   * Only when it is not already on screen. Above the 1250px breakpoint the
+   * viewer is position:sticky beside the table and is always in view, so
+   * scrolling there would be a jump to where the user is already looking.
+   * Below it the layout collapses to one column and the viewer sits under the
+   * table, off screen -- which is where clicking a row looks like it did
+   * nothing. Same call either way; the visibility test decides.
+   */
+  function revealViewer() {
+    var el = document.querySelector(".viewer") || document.getElementById("mol");
+    if (!el || !el.getBoundingClientRect || !el.scrollIntoView) return;
+    var vh = window.innerHeight || 0;
+    if (!vh) return;                 // no layout (headless harness): nothing to do
+    var r = el.getBoundingClientRect();
+    if (!r.height) return;
+    // How much of it the user can actually see right now.
+    var seen = Math.min(r.bottom, vh) - Math.max(r.top, 0);
+    if (seen >= Math.min(r.height, vh) * 0.6) return;    // already looking at it
+    var reduce = window.matchMedia &&
+                 window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    el.scrollIntoView(reduce ? { block: "center" }
+                             : { behavior: "smooth", block: "center" });
+  }
 
   function show(r) {
     selected = r.index;
@@ -906,7 +932,7 @@
   document.querySelectorAll("#cands tr[data-mode]").forEach(function (tr) {
     tr.addEventListener("click", function () {
       var r = byIndex(parseInt(tr.dataset.mode, 10));
-      if (r) show(r);
+      if (r) { show(r); revealViewer(); }
     });
   });
   ["f-lo", "f-hi"].forEach(function (id) {

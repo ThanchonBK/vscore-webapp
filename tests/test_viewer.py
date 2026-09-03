@@ -1282,3 +1282,61 @@ def test_sorting_keeps_the_selected_bond(tmp_path):
     r = json.loads(got)
     assert r["selected"] == 5, "sorting changed which bond is selected"
     assert r["markedRow"], "the selected bond must stay marked after sorting"
+
+
+def test_clicking_a_mode_scrolls_the_viewer_into_view(tmp_path):
+    """Off screen, picking a mode has to bring the viewer to the user -- below
+    the 1250px breakpoint the viewer sits under the table, so clicking a row
+    otherwise looks like it did nothing."""
+    _, got = _run_js("C10H8", tmp_path, """
+        VIEWER.top = 2000;                       // far below the fold
+        CALLS.scrolled = [];
+        document.querySelectorAll('#tbl tbody tr')[3].fire('click',
+            {target:{classList:{contains:function(){return false}}}});
+        print(JSON.stringify({
+          scrolled: (CALLS.scrolled || []).length,
+          opts: (CALLS.scrolled || [])[0] || null
+        }));
+    """)
+    r = json.loads(got)
+    assert r["scrolled"] == 1, "the viewer must be scrolled into view"
+    assert r["opts"]["opts"]["block"] == "center"
+
+
+def test_clicking_a_mode_does_not_scroll_when_the_viewer_is_already_visible(tmp_path):
+    """On a wide window the viewer is sticky and already on screen; scrolling
+    there would be a jump to where the user is already looking."""
+    _, got = _run_js("C10H8", tmp_path, """
+        VIEWER.top = 60;                         // sticky, in view
+        CALLS.scrolled = [];
+        document.querySelectorAll('#tbl tbody tr')[3].fire('click',
+            {target:{classList:{contains:function(){return false}}}});
+        print(JSON.stringify({scrolled: (CALLS.scrolled || []).length}));
+    """)
+    assert json.loads(got)["scrolled"] == 0
+
+
+def test_selecting_a_mode_on_load_does_not_scroll(tmp_path):
+    """The first mode is selected as the page renders. Scrolling then would
+    move the page out from under someone who has not clicked anything."""
+    _, got = _run_js("C10H8", tmp_path, """
+        print(JSON.stringify({scrolled: (CALLS.scrolled || []).length}));
+    """)
+    assert json.loads(got)["scrolled"] == 0
+
+
+def test_clicking_a_TR_candidate_also_scrolls_to_the_viewer(tmp_path):
+    """Both tables behave the same way: a mode is a mode."""
+    pay = _payload_with_mixed_externals()
+    assert pay["candidates"], "test setup produced no candidates"
+    _, got = _run_js(None, tmp_path, """
+        VIEWER.top = 2000;
+        CALLS.scrolled = [];
+        var rows = document.querySelectorAll('#cands tr[data-mode]');
+        rows[0].fire('click');
+        print(JSON.stringify({rows: rows.length,
+                              scrolled: (CALLS.scrolled || []).length}));
+    """, payload=pay)
+    r = json.loads(got)
+    assert r["rows"] > 0, "candidate rows must be reachable from the document"
+    assert r["scrolled"] == 1

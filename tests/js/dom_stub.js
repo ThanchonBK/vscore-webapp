@@ -73,11 +73,30 @@ function El(id, tag) {
       return this._ths;
     }
     return []; };
-  this.scrollIntoView=function(){};
+  this.scrollIntoView=function(o){ CALLS.scrolled=(CALLS.scrolled||[]);
+                                   CALLS.scrolled.push({id:me.id, opts:o}); };
   this.remove=function(){};
   this.click=function(){ this.fire('click',{target:{classList:{contains:function(){return false}}}}); };
 }
 var REG={};
+/* One stub row per payload candidate, built once and reused so a listener
+   attached to a row is still on the row a later lookup returns. */
+var _CANDROWS=null;
+function CANDROWS(){
+  if(!_CANDROWS){
+    var cands=[];
+    try { cands=(JSON.parse(PAYLOAD_TXT).candidates)||[]; } catch(e){ cands=[]; }
+    _CANDROWS=cands.map(function(c){
+      var e=new El("cand","TR"); e.dataset={mode:String(c.mode_index)}; return e;
+    });
+  }
+  return _CANDROWS;
+}
+var VIEWER=new El("viewer");
+VIEWER.top=0; VIEWER.h=520;
+VIEWER.getBoundingClientRect=function(){
+  return {top:VIEWER.top, bottom:VIEWER.top+VIEWER.h, height:VIEWER.h};
+};
 function get(id){ if(!REG[id]) REG[id]=new El(id); return REG[id]; }
 REG["payload"]=new El("payload"); REG["payload"].textContent=PAYLOAD_TXT;
 REG["downloads"]=new El("downloads"); REG["downloads"].textContent=DL_TXT;
@@ -94,6 +113,9 @@ var document={
   createElement:function(t){return new El("new",t)},
   querySelector:function(s){
     if (s.indexOf("tbody")>-1) return TBODY;
+    // The 3D viewer panel. Given a real rect so revealViewer()'s visibility
+    // test actually runs; VIEWER.top is what a test moves on and off screen.
+    if (s===".viewer") return VIEWER;
     var m=/\.bhead \.bsort\[data-bsort="([a-z]+)"\]/.exec(s);
     if (m) return BHEAD.filter(function(e){return e.dataset.bsort===m[1]})[0]||null;
     return new El("s"); },
@@ -107,12 +129,16 @@ var document={
     // markBondRows() moves the compare table's selected-bond class without
     // re-rendering it, so it reaches the rows from the document down
     if (s==="#cmp-bonds tr.cbrow") return get("cmp-bonds").querySelectorAll("tr.cbrow");
+    // The T/R candidate rows are rendered server-side by Jinja, so there is no
+    // markup here to parse -- synthesise one row per candidate in the payload,
+    // carrying the data-mode app.js reads, so the click path is exercised.
+    if (s==="#cands tr[data-mode]") return CANDROWS();
     return [];
   },
   addEventListener:function(){},
   body:new El("body")
 };
-var window={matchMedia:function(){return{matches:false}}};
+var window={matchMedia:function(){return{matches:false}}, innerHeight:800};
 var URL={createObjectURL:function(){return "blob:x"},revokeObjectURL:function(){}};
 function Blob(a,b){ this.parts=a; this.type=b.type; }
 function getComputedStyle(){ return {getPropertyValue:function(){return "white"}}; }
