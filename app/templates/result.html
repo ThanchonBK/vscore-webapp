@@ -124,11 +124,14 @@
       {% if p.references %}The six <b>Tx&hellip;Rz</b> rows are the constructed ideal
       translation and rotation modes; they highlight their own slot.{% else %}
       Every row is a mode from your file &mdash; nothing was constructed.{% endif %}
-      An <b class="lab S">S</b>/<b class="lab B">B</b>/<b class="lab SB">SB</b> mode
-      highlights <b>V_S</b>; a starred label (<code>Tx*</code>) is part external and
-      part vibration, so both <b>V_S</b> and its largest T/R score are highlighted,
-      and its vibrational character is shown as a second chip. Click any row to
-      animate it, or tick its <b>cmp</b> box.
+      Every mode is labelled <b class="lab S">S</b> or <b class="lab B">B</b> from
+      its own <b>V_S</b>, which is the score highlighted.
+      {% if p.candidates %}The modes that best match a rigid-body slot are listed
+      above as <b>T/R candidates</b> rather than labelled as such here; accept
+      them there to fold them in, and a starred label (<code>Tx*</code>) then
+      highlights both <b>V_S</b> and its largest T/R score, with its vibrational
+      character as a second chip.{% endif %}
+      Click any row to animate it, or tick its <b>cmp</b> box.
     </p>
     <p class="legend">
       <b>Comparing modes.</b> Tick <b>cmp</b> on two or three rows and a panel

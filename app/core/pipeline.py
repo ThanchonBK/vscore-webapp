@@ -196,8 +196,8 @@ def analyse(atoms, coords, bonds, modes, title="", source="", warnings=None,
             f"{len(vibrations)} mode{'s' if len(vibrations) != 1 else ''} "
             f"{how} (3N = {3 * len(atoms)}, {shape} = {3 * len(atoms) - n_ext}). "
             "The ideal T/R references were constructed and fill every external "
-            "slot, so none of your modes can be claimed as a translation or "
-            "rotation — each is classified on its own s[V_S].")
+            "slot, so none of your modes is offered as a T/R candidate — each "
+            "is classified on its own s[V_S].")
 
     if mode_set == "3n":
         # Read the CLASSIFIER's verdict, not the displayed label: the default
@@ -213,8 +213,9 @@ def analyse(atoms, coords, bonds, modes, title="", source="", warnings=None,
                 f"{len(starred)} mixed external"
                 + ("s" if len(starred) > 1 else "") + ": "
                 + ", ".join(f"{r['name']} {r['ext_label']}" for r in starred)
-                + ". Each is part rigid-body motion, part vibration — both its "
-                  "V_S and its largest T/R score are highlighted.")
+                + ". Each is part rigid-body motion, part vibration. They are "
+                  "listed under T/R candidates and are labelled from s[V_S] "
+                  "like every other mode until you accept them.")
         if len(assigned) < n_ext:
             warnings.append(
                 f"Only {len(assigned)} of the {n_ext} external slots were "
@@ -297,7 +298,9 @@ def _row(m, vector, index, is_reference=False, is_emit=False, constructed=False)
     ext_label = m["classification"]
 
     # What the UI highlights follows the LABEL, not the raw abs-max, because
-    # the label is what the algorithm actually concluded:
+    # the label is what the algorithm actually concluded. Computed for BOTH
+    # views: the default one labels every mode from s[V_S] and so always marks
+    # it, and the accepted-candidate view marks by the rules below.
     #
     #   clean external (Tx..Rz)  -> that slot's score. The mode is a rigid-body
     #                               motion; its s[V_S] is ~0 by the purity gate.

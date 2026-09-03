@@ -4,8 +4,17 @@ Upload a frequency calculation, get seven scores and a label for every normal
 mode, and watch any mode animate in 3D.
 
 Seven scores per mode: `s[Tx] s[Ty] s[Tz]` (translation), `s[Rx] s[Ry] s[Rz]`
-(rotation), `s[V_S]` (stretch character). Then a label — **S** stretching,
-**B** bending — with the largest |score| highlighted in each row.
+(rotation), `s[V_S]` (stretch character). Then a label for **every** mode —
+**S** stretching, **B** bending — split on `s[V_S]` at τ_SB, with the score the
+label was read from highlighted in each row.
+
+Whether a mode is a rigid-body translation or rotation is asked separately, and
+answered separately. The Hungarian assignment still picks the six best matches
+for the external slots, but those picks are listed as **T/R candidates** rather
+than written into the table, each with its **related score** — the mode's own
+score in that slot's column. Accept them and they read `Tx` / `Tx*` exactly as
+the classifier labelled them; ignore them and every mode stays a stretch or a
+bend. See [T/R candidates](#tr-candidates).
 
 The scoring core is a verbatim copy of the reference implementation in
 `../scoring-functions`. All 24 molecules with published results reproduce them
@@ -102,6 +111,60 @@ masses set the centre of mass and the principal axes, and the R-scores are
 measured in that frame. Falsifying HOCl to all-carbon moves `Tx` from −0.300 to
 +0.328.
 
+## T/R candidates
+
+The classifier answers two questions that are only sometimes the same one:
+
+1. **Is this mode a stretch or a bend?** Answerable for every mode, from
+   `s[V_S]` alone. Always meaningful.
+2. **Which mode best matches each rigid-body slot?** A one-to-one Hungarian
+   assignment over the whole pool, then two purity gates
+   (`|slot score| ≥ τ_TR` and `s[V_S] ≤ τ_purity`).
+
+The second is one-to-one over *whatever pool it is given*, so it always names
+six modes — including when the set contains no rigid-body motion at all. An
+EMIT basis is exactly that case. Benzene's 36 EMIT modes:
+
+| mode | slot | related score | purity | if accepted |
+|---|---|---|---|---|
+| EMIT 34 | T_x | 1.000 | part vibration | `Tx*` |
+| EMIT 35 | T_y | 1.000 | part vibration | `Ty*` |
+| EMIT 36 | T_z | 1.000 | passed both gates | `Tz` |
+| EMIT 6 | R_x | 0.383 | part vibration | `Rx*` |
+| EMIT 9 | R_y | 0.215 | part vibration | `Ry*` |
+| EMIT 19 | R_z | 0.333 | part vibration | `Rz*` |
+
+The three translations are real; the three "rotations" are just the closest
+available match at 0.22–0.38. Previously all six were written into the table as
+`Rx*`/`Ry*`/`Rz*` with nothing to say how weak the match was.
+
+So the picks are held aside. It is called a **related score**, not a
+confidence: it is the mode's own `s[Tx]` and nothing more — how much the mode
+resembles that slot, not how likely it is to be one. Those coincide on a 3N set
+and come apart on EMIT.
+
+By mode set:
+
+- **3N−6** — the ideal T/R references are constructed and win all six slots, so
+  there are no candidates. The references keep their own T/R labels, being
+  rigid-body motions by construction, and are never offered as candidates.
+- **3N** — the six real T/R modes are offered, typically at 1.000.
+- **EMIT / arbitrary** — offered with whatever related score they earn, which is
+  the case the separation exists for.
+
+Accepting is a view: nothing is re-scored, both views ship in the same payload,
+and it is reversible. `ext_label` always carries the classifier's own verdict —
+that is what `test_matches_reference` compares against all 24 published CSVs —
+while `label` is the stretch/bend view. The CSV download follows whichever view
+is on screen and records `tr_candidates_incorporated`, with
+`tr_candidate_slot` and `tr_candidate_related_score` present in both so neither
+file loses what the other shows.
+
+Implemented in `core/candidates.py`, layered over the classifier's output
+rather than edited into it — `core/classifier.py` is a verbatim copy (see
+[the vendored scoring core](#the-vendored-scoring-core)) and an edit there would
+conflict at the next re-sync.
+
 ## Two things worth knowing
 
 **Displacement precision.** Write `freq=hpmodes` (5 dp). Standard 2-dp output
@@ -148,9 +211,10 @@ app/
     scoring.py         ) verbatim from scoring-functions,
     classifier.py      ) import paths adjusted only
     utils.py           )
-    thresholds.json    ) calibrated τ_TR / τ_S / τ_B
+    thresholds.json    ) calibrated τ_TR / τ_S / τ_B / τ_SB
+    candidates.py      splits the classifier's one label into the two views
     parsers.py         .log / .com / .vsc readers + .vsc writer
-    pipeline.py        parse -> align -> score -> classify
+    pipeline.py        parse -> align -> score -> classify -> split views
   templates/           Jinja pages
   static/              app.css, app.js, 3Dmol-min.js (vendored, no CDN)
 make_vsc.py            batch converter
@@ -203,7 +267,7 @@ than silently returning different numbers.
 ## Tests
 
 ```bash
-.venv/bin/python -m pytest tests/ -q     # 79 passed
+.venv/bin/python -m pytest tests/ -q     # 245 passed
 ```
 
 Compares every score and label against `scoring-functions/data/results/*.csv`,
@@ -217,13 +281,23 @@ mismatch, a log with no frequency job, an unknown element, low precision.
 everything to it. The whole scoring core is vendored under `app/`, so the
 function is self-contained.
 
+This repository is connected to the Vercel project, so **pushing to `main`
+deploys**. Live at <https://vscore.vercel.app>. To deploy without a push:
+
 ```bash
-npx vercel login
 npx vercel --prod
 ```
 
-Every feature works there — no statefulness is required anywhere. The only
-platform limit that bites is the ~4.5 MB request body cap; the app refuses
-oversized uploads with a message pointing at `.vsc` conversion.
+Every feature works there — no statefulness is required anywhere, and nothing
+is gated to localhost. Direct paste-in and the in-browser builder can be
+withdrawn from a deployment by setting `VSCORE_PASTE=0` in the environment;
+`_build()` re-checks the flag server-side, so hiding the tab is never the only
+thing standing in the way.
+
+The one platform limit that bites is Vercel's ~4.5 MB request body cap, which
+rejects a request *before* the app runs — so an oversize upload gets Vercel's
+`FUNCTION_PAYLOAD_TOO_LARGE` rather than the app's own message. Under that cap
+the app's own 4 MB limit applies and does explain itself, pointing at `.vsc`
+conversion.
 
 **Anything long-running.** `uvicorn app.main:app --host 0.0.0.0 --port $PORT`.

@@ -27,28 +27,71 @@
 
   <h2>The label</h2>
   <p>
-    Six external slots (three translations, three rotations — two if the molecule
-    is linear) are assigned across the whole mode pool by a one-to-one Hungarian
-    assignment maximising Σ|score|. An assigned mode is "clean" only if it passes
-    <em>both</em> gates: |slot score| ≥ τ<sub>TR</sub> and
-    s[V<sub>S</sub>] ≤ τ<sub>purity</sub>; otherwise it carries a trailing
-    <code>*</code>. Everything unassigned is labelled from s[V<sub>S</sub>] alone,
-    on a single cut point: <b class="lab S">S</b> stretching (≥ τ<sub>SB</sub>),
+    <b>Every mode is labelled from s[V<sub>S</sub>] alone</b>, on a single cut
+    point: <b class="lab S">S</b> stretching (≥ τ<sub>SB</sub>),
     <b class="lab B">B</b> bending (below it). This is the binary scheme the
-    paper standardised on; every internal mode gets one or the other, so
-    <b class="lab SB">SB</b> (mixed) no longer appears.
+    paper standardised on; every mode gets one or the other, so
+    <b class="lab SB">SB</b> (mixed) no longer appears. It is asked of every
+    mode because it is answerable for every mode — a stretch/bend split needs
+    nothing but the mode's own V-score.
+  </p>
+
+  <h2>T/R candidates</h2>
+  <p>
+    Whether a mode is a rigid-body translation or rotation is a separate
+    question, and one that depends on the mode set rather than on any single
+    mode. Six external slots (three translations, three rotations — two if the
+    molecule is linear) are assigned across the whole pool by a one-to-one
+    Hungarian assignment maximising Σ|score|. An assigned mode is "clean" only
+    if it passes <em>both</em> gates: |slot score| ≥ τ<sub>TR</sub> and
+    s[V<sub>S</sub>] ≤ τ<sub>purity</sub>; otherwise it carries a trailing
+    <code>*</code>.
   </p>
   <p>
-    In practice the six slots are always won by the ideal T/R reference modes,
-    which score exactly 1.000 — across the 26 reference molecules, none of their
-    463 real vibrations ever took an external slot. So for an uploaded frequency
-    job, expect <b class="lab S">S</b>/<b class="lab B">B</b> throughout. The reference rows are shown (toggle "reference modes") as a
-    sanity check on the alignment, not as results.
+    That assignment is one-to-one over whatever pool it is given, so it always
+    names six modes — even when the set contains no rigid-body motion at all.
+    An EMIT basis is exactly that case: nothing in it is a translation or a
+    rotation, yet six modes are still the closest match to those slots. So the
+    picks are <em>not</em> written into the table. They are listed separately as
+    <b>T/R candidates</b>, each with its <b>related score</b> — the mode's own
+    score in that slot's column, which says how much it resembles that motion,
+    not how likely it is to be one. On benzene's EMIT set the three
+    translations come out at 1.000 while the "rotations" sit at 0.22–0.38,
+    and that gap is the whole point of showing the number.
+  </p>
+  <p>
+    Tick <em>"treat these as real T/R modes"</em> to fold them into the table,
+    where they read <b class="lab Tx">T<sub>x</sub></b> or
+    <b class="lab Tx">T<sub>x</sub>*</b> exactly as the classifier labelled
+    them. Leave it unticked and every mode stays a stretch or a bend. The
+    choice is yours to make per result, it changes nothing that was computed,
+    and the CSV you download records which view it came from.
+  </p>
+  <p>
+    On a 3N−6 upload the ideal T/R references are constructed and win all six
+    slots — across the 26 reference molecules, none of their 463 real
+    vibrations ever took one — so there are no candidates to decide about. The
+    reference rows are shown (toggle "reference modes") as a sanity check on
+    the alignment, not as results; they keep their T/R labels, being rigid-body
+    motions by construction.
   </p>
 
   <h2>The highlighted cell</h2>
   <p>
-    Largest <b>absolute</b> value of the seven, not largest raw value.
+    The highlight follows the <em>label</em>, not the biggest number — it marks
+    the score the verdict was actually read from. With every mode labelled
+    <b class="lab S">S</b> or <b class="lab B">B</b>, that is
+    <code>s[V<sub>S</sub>]</code>. Accept a T/R candidate and its row moves to
+    its slot's column instead, or to <em>both</em> that column and
+    <code>s[V<sub>S</sub>]</code> for a starred one, which by definition is
+    part rigid-body motion and part vibration. The six T/R numbers stay visible
+    on every row either way: they are diagnostics, and marking one on a mode
+    the algorithm never assigned would assert external character it does not
+    have.
+  </p>
+  <p>
+    The separate <em>dominant</em> score reported in the CSV is the largest
+    <b>absolute</b> value of the seven, not the largest raw value.
     <code>s[V<sub>S</sub>]</code> alone cannot be negative, so a raw comparison
     would favour it structurally — it would win 64% of modes rather than 57%, and
     would pick +0.087 over −0.283. A mode translating along −x is exactly as

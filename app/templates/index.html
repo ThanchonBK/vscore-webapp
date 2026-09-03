@@ -13,9 +13,10 @@
   <h1>Score the normal modes of a molecule.</h1>
   <p class="lede">
     Seven scores per mode — <code>Tx Ty Tz</code> translation, <code>Rx Ry Rz</code>
-    rotation, <code>V_S</code> stretch character — then a label:
+    rotation, <code>V_S</code> stretch character — then a label for every mode:
     <b class="lab S">S</b> stretching or <b class="lab B">B</b> bending,
-    split at τ<sub>SB</sub>.
+    split at τ<sub>SB</sub>. Modes that best match a rigid-body slot are listed
+    separately as T/R candidates, yours to accept or ignore.
   </p>
 
   <form method="post" action="/score" enctype="multipart/form-data" id="form">
