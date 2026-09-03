@@ -49,14 +49,14 @@
       there are none, and these are modes carrying the most T/R character.</span>
   </div>
   <table>
-    <tr><th>mode</th><th>slot</th><th>confidence</th><th>purity</th><th>if accepted</th></tr>
+    <tr><th>mode</th><th>slot</th><th title="The mode's own score in that slot's column: how much it looks like that motion, not how likely it is to be one">related score</th><th>purity</th><th>if accepted</th></tr>
     {% for c in p.candidates %}
     <tr data-mode="{{ c.mode_index }}">
       <td class="mode">{{ c.name }}</td>
       <td><b class="lab {{ c.slot }}">{{ c.kind }}<sub>{{ c.axis }}</sub></b></td>
       <td class="n">
-        <span class="cbar"><i style="width:{{ (c.confidence * 100)|round(1) }}%"></i></span>
-        {{ "%.3f"|format(c.confidence) }}
+        <span class="cbar"><i style="width:{{ (c.related_score * 100)|round(1) }}%"></i></span>
+        {{ "%.3f"|format(c.related_score) }}
       </td>
       <td>{% if c.clean %}<span class="ok">passed both gates</span>
           {% else %}<span class="part">part vibration</span>{% endif %}</td>

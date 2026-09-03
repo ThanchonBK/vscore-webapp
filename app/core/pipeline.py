@@ -401,8 +401,8 @@ def to_csv_rows(payload, include_references=False, incorporate=False):
             # the label; with it True the label is the classifier's verdict.
             "tr_candidates_incorporated": bool(incorporate),
             "tr_candidate_slot": (r["candidate"] or {}).get("slot"),
-            "tr_candidate_confidence": (
-                round((r["candidate"] or {}).get("confidence"), 4)
+            "tr_candidate_related_score": (
+                round((r["candidate"] or {}).get("related_score"), 4)
                 if r["candidate"] else None),
             # highlighted_score is what the table marks: the dominant score on a
             # constructed T/R reference, and always V_S on a real vibration.

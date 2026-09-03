@@ -19,9 +19,9 @@ That conflates two questions which are only sometimes the same one:
 
 So both are computed and kept apart. Every mode carries a stretch/bend label;
 the assignment's picks are additionally offered as CANDIDATES, each with the
-slot score that won it as a confidence, for the caller to accept or ignore.
-Nothing here re-runs the classifier or second-guesses it -- the assignment and
-the purity gates are exactly as they were, only presented separately.
+slot score that won it, for the caller to accept or ignore. Nothing here
+re-runs the classifier or second-guesses it -- the assignment and the purity
+gates are exactly as they were, only presented separately.
 
 This module deliberately holds no thresholds of its own: it reads labels the
 classifier already produced and calls its ``vib_label`` for the S/B split, so
@@ -49,11 +49,18 @@ def candidate_of(mode):
     """The external-slot candidacy of one classified mode, or None.
 
     Returns the slot it was assigned ("Tx"), the score that won it (signed, so
-    a mode translating along -x is not silently reported as +), the confidence
-    (that score's magnitude -- what the Hungarian assignment maximised), and
-    whether it passed both purity gates. `label` is the classifier's own
-    verdict, kept verbatim so accepting a candidate reproduces exactly what
-    the algorithm used to output for it, star and all.
+    a mode translating along -x is not silently reported as +), the related
+    score (that value's magnitude -- what the Hungarian assignment maximised),
+    and whether it passed both purity gates.
+
+    `label` is the classifier's own verdict, kept verbatim so accepting a
+    candidate reproduces exactly what the algorithm used to output for it,
+    star and all.
+
+    The magnitude is called a related score, not a confidence: it is the mode's
+    own s[Tx] and nothing more. It says how much the mode looks like that slot,
+    not how likely the mode is to be a real rigid-body motion -- on an EMIT
+    basis the best match is still not a rotation, however high it climbs.
     """
     label = mode["classification"]
     if not is_external_label(label):
@@ -66,7 +73,7 @@ def candidate_of(mode):
         "kind": axis_type,           # "T" or "R", for grouping in the UI
         "axis": axis,
         "score": float(value),
-        "confidence": abs(float(value)),
+        "related_score": abs(float(value)),
         "clean": is_clean_external(label),
         "label": label,              # "Tx" or "Tx*"
         "annotation": mode["annotation"],
@@ -82,8 +89,8 @@ def split_views(scored, thresholds, scheme="binary"):
 
     Returns the candidate list in slot order (Tx, Ty, Tz, Rx, Ry, Rz), each
     entry carrying the index of the mode it belongs to, so a caller can render
-    it as its own table without re-scanning. Slot order rather than confidence
-    order: the six slots are a fixed frame, and sorting by confidence would
+    it as its own table without re-scanning. Slot order rather than by score:
+    the six slots are a fixed frame, and sorting by the number would
     reshuffle the table between molecules and hide a weak axis among strong
     ones.
     """

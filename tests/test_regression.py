@@ -1018,9 +1018,9 @@ def test_candidates_are_the_assignments_the_classifier_made():
             c = by_index[r["index"]]
             assert c["label"] == r["ext_label"]
             assert c["slot"] == r["ext_label"].rstrip("*")
-            # confidence is that slot's own score magnitude
-            assert c["confidence"] == pytest.approx(abs(r["scores"][c["slot"]]), abs=5e-4)
-            assert 0.0 <= c["confidence"] <= 1.0 + 1e-9
+            # the related score is that slot's own score magnitude
+            assert c["related_score"] == pytest.approx(abs(r["scores"][c["slot"]]), abs=5e-4)
+            assert 0.0 <= c["related_score"] <= 1.0 + 1e-9
 
 
 def test_one_candidate_per_slot_at_most():
@@ -1084,4 +1084,4 @@ def test_csv_export_follows_the_view_and_says_which_one():
     picked = [r for r in plain if r["tr_candidate_slot"]]
     assert len(picked) == len(p["candidates"])
     for r in picked:
-        assert 0.0 <= r["tr_candidate_confidence"] <= 1.0
+        assert 0.0 <= r["tr_candidate_related_score"] <= 1.0
