@@ -49,7 +49,7 @@
       there are none, and these are modes carrying the most T/R character.</span>
   </div>
   <table>
-    <tr><th>mode</th><th>slot</th><th title="The mode's own score in that slot's column: how much it looks like that motion, not how likely it is to be one">related score</th><th>purity</th><th>if accepted</th></tr>
+    <tr><th>mode</th><th>slot</th><th title="The mode's own score in that slot's column: how much it looks like that motion, not how likely it is to be one">related score</th></tr>
     {% for c in p.candidates %}
     <tr data-mode="{{ c.mode_index }}">
       <td class="mode">{{ c.name }}</td>
@@ -58,9 +58,6 @@
         <span class="cbar"><i style="width:{{ (c.related_score * 100)|round(1) }}%"></i></span>
         {{ "%.3f"|format(c.related_score) }}
       </td>
-      <td>{% if c.clean %}<span class="ok">passed both gates</span>
-          {% else %}<span class="part">part vibration</span>{% endif %}</td>
-      <td><b class="lab {{ c.label|replace('*','x') }}">{{ c.label }}</b></td>
     </tr>
     {% endfor %}
   </table>
@@ -128,9 +125,8 @@
       its own <b>V_S</b>, which is the score highlighted.
       {% if p.candidates %}The modes that best match a rigid-body slot are listed
       above as <b>T/R candidates</b> rather than labelled as such here; accept
-      them there to fold them in, and a starred label (<code>Tx*</code>) then
-      highlights both <b>V_S</b> and its largest T/R score, with its vibrational
-      character as a second chip.{% endif %}
+      them there to fold them in, and each then highlights its own slot's
+      score instead of V_S.{% endif %}
       Click any row to animate it, or tick its <b>cmp</b> box.
     </p>
     <p class="legend">

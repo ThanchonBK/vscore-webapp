@@ -324,9 +324,11 @@ def test_bonds_toggle_switches_the_style(tmp_path):
 # ----------------------------------------------------------------------
 # Highlighting follows the label; axes are drawn in the principal frame.
 # ----------------------------------------------------------------------
-def test_mixed_external_highlights_both_scores(tmp_path):
-    """A starred label is part external and part vibration, so one number
-    cannot describe it: highlight V_S AND the largest |T/R|."""
+def test_highlight_follows_the_label(tmp_path):
+    """A clean external highlights only its own slot; an internal mode
+    highlights only V_S. No purity gate (2026-09-03, matching
+    JCC_man_scoring.pdf Table 4) means there is no starred, dual-highlight
+    case left -- every external is single-highlighted."""
     log = REF / "logs" / "C6H6.log"
     payload, got = _run_js("C6H6", tmp_path, """
         var K = ['Tx','Ty','Tz','Rx','Ry','Rz','V_S'], out = [];
@@ -343,14 +345,13 @@ def test_mixed_external_highlights_both_scores(tmp_path):
     """)
     rows = json.loads(got)
     assert rows, "no rows rendered"
+    assert any(r["label"] and r["label"][0] in "TR" for r in rows), \
+        "test setup produced no external to check"
     for r in rows:
         lab = r["label"]
-        if lab and lab[0] in "TR" and lab.endswith("*"):
-            assert len(r["hot"]) == 2, f"{lab}: {r['hot']}"
-            assert "V_S" in r["hot"]
-            assert any(k != "V_S" for k in r["hot"])
-        elif lab and lab[0] in "TR":
-            assert r["hot"] == [lab], f"clean external {lab} highlighted {r['hot']}"
+        assert not (lab and lab.endswith("*")), f"purity gate is dropped: {lab}"
+        if lab and lab[0] in "TR":
+            assert r["hot"] == [lab], f"external {lab} highlighted {r['hot']}"
         else:
             assert r["hot"] == ["V_S"], f"internal {lab} highlighted {r['hot']}"
 
@@ -382,10 +383,11 @@ def test_axes_are_drawn_and_toggle(stem, tmp_path):
     assert r["loops"] == 1, "toggling axes must not stack animation loops"
 
 
-def _payload_with_mixed_externals():
+def _payload_with_off_axis_TR():
     """A 3N pool whose T/R modes are built about NON-principal axes, so the
-    external slots come back starred. The .log path cannot produce this: it
-    constructs clean principal-frame references."""
+    Hungarian assignment ends up swapping which mode wins each slot rather
+    than recovering the six real T/R modes cleanly. The .log path cannot
+    produce this: it constructs clean principal-frame references."""
     from app.core.scoring import ModeScorer
     log = REF / "logs" / "HCOOH.log"
     com = REF / "gjf" / "HCOOH.com"
@@ -415,9 +417,8 @@ _CHIPS = """
 def test_candidates_are_not_labelled_TR_until_accepted(tmp_path):
     """The default view calls every mode a stretch or a bend, even the ones the
     assignment picked for a slot -- that is the point of holding them back."""
-    pay = _payload_with_mixed_externals()
-    assert any(r["ext_label"].endswith("*") for r in pay["vibrations"]), \
-        "test setup produced no mixed external"
+    pay = _payload_with_off_axis_TR()
+    assert pay["candidates"], "test setup produced no candidates"
     _, got = _run_js(None, tmp_path, _CHIPS + "print(JSON.stringify(chips()));",
                      payload=pay)
     rows = json.loads(got)
@@ -430,10 +431,11 @@ def test_candidates_are_not_labelled_TR_until_accepted(tmp_path):
         assert "vibration=" not in r["raw"]
 
 
-def test_starred_external_shows_a_second_label_chip(tmp_path):
-    """Once accepted, a mixed external renders as two chips, e.g. [Tx*][SB] --
-    not as the raw annotation text "vibration=SB"."""
-    pay = _payload_with_mixed_externals()
+def test_accepted_external_shows_exactly_one_chip(tmp_path):
+    """No purity gate (2026-09-03, matching JCC_man_scoring.pdf Table 4 --
+    see classifier.py's Step 3 docstring) means an accepted candidate is
+    always a single bare slot name, never a starred second chip."""
+    pay = _payload_with_off_axis_TR()
     _, got = _run_js(None, tmp_path, _CHIPS + """
         var t = document.getElementById('use-ext');
         t.checked = true; t.fire('change');
@@ -441,21 +443,18 @@ def test_starred_external_shows_a_second_label_chip(tmp_path):
     """, payload=pay)
     rows = json.loads(got)
     assert rows
-    starred = [r for r in rows if r["chips"] and r["chips"][0].endswith("*")]
-    assert starred, "no mixed external rendered after accepting the candidates"
-    for r in starred:
-        assert len(r["chips"]) == 2, f"expected two chips, got {r['chips']}"
-        assert r["chips"][1] in ("S", "B", "SB"), r["chips"]
-        assert "vibration=" not in r["raw"], "raw annotation text must not be shown"
-    for r in rows:
-        if r["chips"] and not r["chips"][0].endswith("*"):
-            assert len(r["chips"]) == 1, f"unstarred row got {r['chips']}"
+    accepted = [r for r in rows if r["chips"] and r["chips"][0][0] in "TR"]
+    assert accepted, "test setup produced no accepted external"
+    for r in accepted:
+        assert len(r["chips"]) == 1, f"expected one chip, got {r['chips']}"
+        assert not r["chips"][0].endswith("*"), r["chips"]
+        assert "vibration=" not in r["raw"]
 
 
 def test_accepting_candidates_is_reversible(tmp_path):
     """Switching back must restore the stretch/bend view exactly -- the toggle
     is a view, so nothing may be lost by flipping it."""
-    pay = _payload_with_mixed_externals()
+    pay = _payload_with_off_axis_TR()
     _, got = _run_js(None, tmp_path, _CHIPS + """
         var before = JSON.stringify(chips());
         var t = document.getElementById('use-ext');
@@ -1327,7 +1326,7 @@ def test_selecting_a_mode_on_load_does_not_scroll(tmp_path):
 
 def test_clicking_a_TR_candidate_also_scrolls_to_the_viewer(tmp_path):
     """Both tables behave the same way: a mode is a mode."""
-    pay = _payload_with_mixed_externals()
+    pay = _payload_with_off_axis_TR()
     assert pay["candidates"], "test setup produced no candidates"
     _, got = _run_js(None, tmp_path, """
         VIEWER.top = 2000;

@@ -118,25 +118,27 @@ The classifier answers two questions that are only sometimes the same one:
 1. **Is this mode a stretch or a bend?** Answerable for every mode, from
    `s[V_S]` alone. Always meaningful.
 2. **Which mode best matches each rigid-body slot?** A one-to-one Hungarian
-   assignment over the whole pool, then two purity gates
-   (`|slot score| ≥ τ_TR` and `s[V_S] ≤ τ_purity`).
+   assignment over the whole pool — a plain pick, no purity gate. (This
+   webapp deliberately drops the reference implementation's two-gate purity
+   test here, matching `JCC_man_scoring.pdf` Table 4, which prints only the
+   winning slot's bare name.)
 
 The second is one-to-one over *whatever pool it is given*, so it always names
 six modes — including when the set contains no rigid-body motion at all. An
 EMIT basis is exactly that case. Benzene's 36 EMIT modes:
 
-| mode | slot | related score | purity | if accepted |
-|---|---|---|---|---|
-| EMIT 34 | T_x | 1.000 | part vibration | `Tx*` |
-| EMIT 35 | T_y | 1.000 | part vibration | `Ty*` |
-| EMIT 36 | T_z | 1.000 | passed both gates | `Tz` |
-| EMIT 6 | R_x | 0.383 | part vibration | `Rx*` |
-| EMIT 9 | R_y | 0.215 | part vibration | `Ry*` |
-| EMIT 19 | R_z | 0.333 | part vibration | `Rz*` |
+| mode | slot | related score | if accepted |
+|---|---|---|---|
+| EMIT 34 | T_x | 1.000 | `Tx` |
+| EMIT 35 | T_y | 1.000 | `Ty` |
+| EMIT 36 | T_z | 1.000 | `Tz` |
+| EMIT 6 | R_x | 0.383 | `Rx` |
+| EMIT 9 | R_y | 0.215 | `Ry` |
+| EMIT 19 | R_z | 0.333 | `Rz` |
 
 The three translations are real; the three "rotations" are just the closest
-available match at 0.22–0.38. Previously all six were written into the table as
-`Rx*`/`Ry*`/`Rz*` with nothing to say how weak the match was.
+available match at 0.22–0.38, with nothing in the label itself to say how weak
+the match was — the related-score column is what carries that.
 
 So the picks are held aside. It is called a **related score**, not a
 confidence: it is the mode's own `s[Tx]` and nothing more — how much the mode

@@ -42,10 +42,10 @@
     question, and one that depends on the mode set rather than on any single
     mode. Six external slots (three translations, three rotations — two if the
     molecule is linear) are assigned across the whole pool by a one-to-one
-    Hungarian assignment maximising Σ|score|. An assigned mode is "clean" only
-    if it passes <em>both</em> gates: |slot score| ≥ τ<sub>TR</sub> and
-    s[V<sub>S</sub>] ≤ τ<sub>purity</sub>; otherwise it carries a trailing
-    <code>*</code>.
+    Hungarian assignment maximising Σ|score|. Whichever mode wins a slot gets
+    that slot's bare name — a plain Hungarian pick, no purity gate — matching
+    the reference manuscript's Table 4, which never stars a label or defines
+    a purity threshold.
   </p>
   <p>
     That assignment is one-to-one over whatever pool it is given, so it always
@@ -61,9 +61,9 @@
   </p>
   <p>
     Tick <em>"treat these as real T/R modes"</em> to fold them into the table,
-    where they read <b class="lab Tx">T<sub>x</sub></b> or
-    <b class="lab Tx">T<sub>x</sub>*</b> exactly as the classifier labelled
-    them. Leave it unticked and every mode stays a stretch or a bend. The
+    where they read <b class="lab Tx">T<sub>x</sub></b> exactly as the
+    classifier labelled them. Leave it unticked and every mode stays a
+    stretch or a bend. The
     choice is yours to make per result, it changes nothing that was computed,
     and the CSV you download records which view it came from.
   </p>
@@ -82,12 +82,9 @@
     the score the verdict was actually read from. With every mode labelled
     <b class="lab S">S</b> or <b class="lab B">B</b>, that is
     <code>s[V<sub>S</sub>]</code>. Accept a T/R candidate and its row moves to
-    its slot's column instead, or to <em>both</em> that column and
-    <code>s[V<sub>S</sub>]</code> for a starred one, which by definition is
-    part rigid-body motion and part vibration. The six T/R numbers stay visible
-    on every row either way: they are diagnostics, and marking one on a mode
-    the algorithm never assigned would assert external character it does not
-    have.
+    its slot's column instead. The six T/R numbers stay visible on every row
+    either way: they are diagnostics, and marking one on a mode the algorithm
+    never assigned would assert external character it does not have.
   </p>
   <p>
     The separate <em>dominant</em> score reported in the CSV is the largest

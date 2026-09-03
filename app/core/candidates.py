@@ -1,11 +1,11 @@
 """candidates.py -- split the classifier's one label into two views.
 
-The vendored classifier (``app/core/classifier.py``, a verbatim copy of
-scoring-functions' ``src/classifier.py``) returns ONE label per mode: a slot
-name for a mode that won an external slot and passed the purity gates
-("Tx"), that name starred if it failed them ("Tx*"), or a Step-4 stretch/bend
-label ("S"/"B"). A mode that took a slot therefore never showed its
-stretch/bend character at all.
+The vendored classifier (``app/core/classifier.py``, a near-verbatim copy of
+scoring-functions' ``src/classifier.py`` -- see that file's module docstring
+for the one deliberate deviation, dropping Step 3's purity gate) returns ONE
+label per mode: a slot name for a mode that won an external slot ("Tx"), or a
+Step-4 stretch/bend label ("S"/"B"). A mode that took a slot therefore never
+showed its stretch/bend character at all.
 
 That conflates two questions which are only sometimes the same one:
 
@@ -20,8 +20,8 @@ That conflates two questions which are only sometimes the same one:
 So both are computed and kept apart. Every mode carries a stretch/bend label;
 the assignment's picks are additionally offered as CANDIDATES, each with the
 slot score that won it, for the caller to accept or ignore. Nothing here
-re-runs the classifier or second-guesses it -- the assignment and the purity
-gates are exactly as they were, only presented separately.
+re-runs the classifier or second-guesses it -- the assignment is exactly as
+it was, only presented separately.
 
 This module deliberately holds no thresholds of its own: it reads labels the
 classifier already produced and calls its ``vib_label`` for the S/B split, so
@@ -30,8 +30,7 @@ a recalibration there flows through with no change here.
 
 from __future__ import annotations
 
-from .classifier import (external_axis, is_clean_external, is_external_label,
-                         vib_label)
+from .classifier import external_axis, is_external_label, vib_label
 
 
 def sb_label(mode, thresholds, scheme="binary"):
@@ -49,13 +48,12 @@ def candidate_of(mode):
     """The external-slot candidacy of one classified mode, or None.
 
     Returns the slot it was assigned ("Tx"), the score that won it (signed, so
-    a mode translating along -x is not silently reported as +), the related
-    score (that value's magnitude -- what the Hungarian assignment maximised),
-    and whether it passed both purity gates.
+    a mode translating along -x is not silently reported as +), and the
+    related score (that value's magnitude -- what the Hungarian assignment
+    maximised).
 
     `label` is the classifier's own verdict, kept verbatim so accepting a
-    candidate reproduces exactly what the algorithm used to output for it,
-    star and all.
+    candidate reproduces exactly what the algorithm used to output for it.
 
     The magnitude is called a related score, not a confidence: it is the mode's
     own s[Tx] and nothing more. It says how much the mode looks like that slot,
@@ -74,8 +72,7 @@ def candidate_of(mode):
         "axis": axis,
         "score": float(value),
         "related_score": abs(float(value)),
-        "clean": is_clean_external(label),
-        "label": label,              # "Tx" or "Tx*"
+        "label": label,              # bare slot name, e.g. "Tx"
         "annotation": mode["annotation"],
     }
 

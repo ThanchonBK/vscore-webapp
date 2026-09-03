@@ -399,7 +399,13 @@ def test_emit_vsc_matches_reference():
             assert abs(float(expected[col]) - got["scores"][col]) < 5e-4, \
                 f"{got['name']} {col}"
         assert abs(float(expected["V_Stretch"]) - got["scores"]["V_S"]) < 5e-4
-        assert expected["label"] == got["ext_label"], f"{got['name']}"
+        # Compare axis only, not the star: data/results/C6H6_EMIT.csv is the
+        # reference implementation's output, which still runs Step 3's purity
+        # gate. This webapp deliberately doesn't (2026-09-03, matching
+        # JCC_man_scoring.pdf Table 4 -- see classifier.py's Step 3
+        # docstring), so a mode the reference starred can come back bare here
+        # while still winning the identical slot.
+        assert expected["label"].rstrip("*") == got["ext_label"], f"{got['name']}"
 
     # A real EMIT eigenvector must be able to win a slot outright (not just
     # "*"-mixed) and be highlighted on that slot rather than V_S -- this is
@@ -550,12 +556,17 @@ def test_3n_and_3n6_agree_on_the_real_vibrations():
 
 
 def test_3n_recovery_degrades_off_principal_axes():
-    """Documents the limitation the 3N warning exists for.
+    """Documents the limitation format.html's 3N section warns about in prose.
 
     T/R constructed about non-principal axes become mixtures of Rx/Ry/Rz once
     MIT rotates into the principal frame. No single slot score is then high
     enough to win, so a real vibration can take the slot and a genuine rotation
-    falls through to Step 4.
+    falls through to Step 4 -- still true with no purity gate (2026-09-03,
+    matching JCC_man_scoring.pdf Table 4): the Hungarian assignment still
+    swaps which mode wins each slot, only the reporting of that changed. A
+    starred note used to flag this case explicitly; the paper's "Hungarian
+    pick, full stop" has no such flag, so this is now silent -- same as a
+    clean recovery -- which is the point being documented here.
     """
     from app.core.scoring import ModeScorer
     g, bonds = _molecule()
@@ -569,10 +580,6 @@ def test_3n_recovery_degrades_off_principal_axes():
     assert ext != [f"Vib {i}" for i in range(1, 7)], (
         "off-axis T/R now recovers perfectly; the 3N warning text and this "
         "test's rationale should be revisited")
-    assert any("mixed external" in n for n in p["notes"]), \
-        "the user must be told the recovery was not clean"
-    assert not any("mixed external" in w for w in p["warnings"]), \
-        "a starred label is information, not a fault -- it belongs in notes"
 
 
 def test_mode_set_is_detected_from_the_counts():
@@ -1045,27 +1052,27 @@ def test_constructed_references_are_never_candidates():
         assert r["label"][0] in "TR", f"reference relabelled {r['label']}"
 
 
-def test_accepting_a_starred_candidate_carries_its_annotation():
-    """A candidate that failed the purity gate is part vibration, and saying so
-    is the whole content of the star. The annotation must survive into the
-    accepted view -- and must be absent from the default one, where there is no
-    external label for it to qualify.
+def test_accepted_candidates_are_never_starred():
+    """classifier.py's Step 3 has no purity gate (2026-09-03, matching
+    JCC_man_scoring.pdf Table 4 -- see its docstring): every mode the
+    Hungarian assignment picks for a slot gets that bare slot name, so an
+    EMIT set's candidates -- which include genuinely mixed T/R+vibration
+    modes -- come back clean regardless, with a single highlighted score.
 
-    (That ext_label reproduces the reference implementation itself is covered
-    across 24 molecules by test_matches_reference.)
+    (That ext_label reproduces the reference implementation's ASSIGNMENT
+    (which slot each mode wins), only not its purity gate, is covered across
+    24 molecules by test_matches_reference and test_emit_vsc_matches_reference.)
     """
     p = _emit_payload()
-    starred = [r for r in p["vibrations"] if r["ext_label"].endswith("*")]
-    assert starred, "EMIT is expected to produce mixed externals"
-    for r in starred:
-        assert r["ext_annotation"].startswith("vibration="), r["ext_annotation"]
-        assert r["ext_annotation"].split("=")[1] == r["label"], \
-            "the star's vibration sub-label is the same S/B the default view shows"
-        assert r["annotation"] == "", "no annotation without an external label"
-        # a mixed external is part rigid-body, part vibration, so the accepted
-        # view marks both numbers; the default view marks only V_S
-        assert r["highlights"] == ["V_S"]
-        assert len(r["ext_highlights"]) == 2 and "V_S" in r["ext_highlights"]
+    for r in p["candidates"]:
+        row = p["vibrations"][r["mode_index"]]
+        assert not row["ext_label"].endswith("*"), row["ext_label"]
+        assert row["ext_annotation"] == ""
+        assert row["annotation"] == "", "no annotation without an external label"
+        assert row["highlights"] == ["V_S"], "default view marks only V_S"
+        assert row["ext_highlights"] == [row["ext_label"]], \
+            "accepted view marks only the won slot -- there is no second, " \
+            "vibrational number to mark without a purity gate"
 
 
 def test_csv_export_follows_the_view_and_says_which_one():

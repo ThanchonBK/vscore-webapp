@@ -7,9 +7,12 @@ Implements the spec in IMPLEMENTATION_PLAN.md's "Authoritative spec" section
 classification runs on the identical mode pool ``score_modes()`` scores.
 Self-contained; ``main.py`` orchestrates via ``main.run_classify_pipeline``.
 
-Label vocabulary: a clean external (Step 3 gate pass) is the Step-2 slot name
-("Tx".."Rz"); a mixed external+vibration (gate fail) is the slot name with a
-trailing "*" (e.g. "Tx*"); internal modes (Step 4) are "S"/"B" under the
+WEBAPP DEVIATION from the reference src/classifier.py (2026-09-03): Step 3's
+two-gate purity test is not applied here -- see that step's docstring below
+for why (matching JCC_man_scoring.pdf Table 4, which stars nothing).
+
+Label vocabulary: an external (Step 2 winner) is the Step-2 slot name
+("Tx".."Rz"); internal modes (Step 4) are "S"/"B" under the
 default BINARY scheme (``scheme="binary"``, single cutoff ``tau_SB``), which
 forces every internal mode to STRETCHING or BENDING and never produces "SB"
 -- this is the paper-standard scheme as of the 2026-08 binary-classification
@@ -32,14 +35,15 @@ Step 2  global external-mode assignment: one-to-one ``linear_sum_assignment``
         no degenerate-axis-block special-casing (Decision 8: axis choice
         within a degenerate inertia tensor is a labeling convention fixed by
         the eigensolver, not an assignment ambiguity).
-Step 3  two-gate purity test on each assigned (slot, mode) pair: clean iff
-        |score_for_slot| >= tau_TR AND s[V_S] <= gate2_bar -> the bare slot
-        name (e.g. "Tx"); else the slot name with a trailing "*" (e.g.
-        "Tx*"), annotated with vib_label(s[V_S]). gate2_bar is
-        SCHEME-DEPENDENT: tau_purity (fixed, 0.05) under scheme="binary";
-        tau_B (calibrated, ~0.17) under scheme="threeway", unchanged from
-        before this split existed. Gate 1 (tau_TR) and Step 2's assignment
-        itself remain scheme-independent.
+Step 3  WEBAPP DEVIATION: no purity gate. Every (slot, mode) pair Step 2
+        assigned gets the bare slot name (e.g. "Tx"), unconditionally --
+        matching JCC_man_scoring.pdf Table 4, where a printed slot name
+        means only "the Hungarian assignment picked this mode" and "-"
+        means it didn't; the paper never stars a label or defines tau_TR/
+        tau_purity. (The reference src/classifier.py instead runs a
+        two-gate purity test here -- clean iff |score_for_slot| >= tau_TR
+        AND s[V_S] <= gate2_bar, else starred and annotated with
+        vib_label(s[V_S]) -- see that file if you need the gated version.)
 Step 4  every mode NOT assigned an external slot in Step 2: vib_label(s[V_S])
         -> STRETCHING ("S") / BENDING ("B") / MIXED_STRETCH_BEND ("SB").
         Per-bond s_AB (signed) attached for every mode, regardless of label.
@@ -372,30 +376,26 @@ def _assert_weighting_match(scorer, thresholds):
 def classify_all_modes(scorer, final, thresholds=None, scheme="binary"):
     """Algorithm 1: score every mode, globally assign externals (Step 2:
     plain Hungarian assignment, no degenerate-axis special-casing -- Decision
-    8, deliberately not reintroduced), apply two-gate purity (Step 3), then
-    classify remaining internal modes (Step 4).
+    8, deliberately not reintroduced), give every Step-2 winner its bare slot
+    name (Step 3, no purity gate -- see module docstring), then classify
+    remaining internal modes (Step 4).
 
     scorer must already be MIT-aligned (as build_scorer_and_final leaves it);
     final is its candidate mode pool. thresholds defaults to
     Thresholds.calibrated(). `scheme` is "binary" (default, paper-standard:
     single tau_SB cutoff, never produces "SB") or "threeway" (explicit
     opt-in, may produce "SB"; kept fully functional for comparison/on-demand
-    use) -- passed through to every vib_label() call site below (Step 3's
-    mixed-external annotation AND Step 4's internal label), so the two stay
-    in agreement. It does NOT affect Step 2's assignment itself, or Step 3's
-    gate 1 (tau_TR) -- but it DOES select Step 3's gate 2 bar (see
-    `gate2_bar`): tau_purity under "binary", tau_B under "threeway"
-    (unchanged historical behavior). Returns a list of dicts, one
-    per mode in `final`
+    use) -- passed through to Step 4's vib_label() call site, so unassigned
+    modes still classify the same way regardless of the deviation above.
+    Returns a list of dicts, one per mode in `final`
     (same order): {name, frequency, is_emit, T, R, V, classification,
     annotation, bonds, bonds_all}. 'bonds' (see ModeScorer.score_bonds()) carries
     the per-bond s_AB list for every mode regardless of classification; 'bonds_all'
     is the same list under the name ped/merge_ped_scores.py's per-bond-type
-    breakdown reads. 'classification' is the bare Step-2 slot name for a
-    clean external, that slot name with a trailing "*" for mixed
-    external+vibration, or "S"/"B"/"SB" (or just "S"/"B" under scheme="binary")
-    for a Step-4 internal mode.
-    'annotation' is "vibration=<vib_label>" for mixed-external modes, "" otherwise.
+    breakdown reads. 'classification' is the bare Step-2 slot name for an
+    external, or "S"/"B"/"SB" (or just "S"/"B" under scheme="binary") for a
+    Step-4 internal mode. 'annotation' is always "" here (kept for shape
+    parity with src/classifier.py, which uses it for starred modes).
     """
     if scheme not in ("threeway", "binary"):
         raise ValueError(f"scheme must be 'threeway' or 'binary', got {scheme!r}")
@@ -444,20 +444,18 @@ def classify_all_modes(scorer, final, thresholds=None, scheme="binary"):
         slot = slots[si]
         assignment[mi] = (slot, _score_slot(scored[mi], slot))
 
-    # ---- Step 3: two-gate purity test ----
-    # gate2_bar is scheme-dependent: tau_purity (fixed) under "binary",
-    # tau_B (calibrated) under "threeway" -- see gate2_bar()'s docstring.
-    gate2 = gate2_bar(thresholds, scheme)
-    for mi, (slot, score_value) in assignment.items():
-        v = scored[mi]["V"]
-        if abs(score_value) >= thresholds.tau_TR and v <= gate2:
-            scored[mi]["classification"] = slot
-        else:
-            scored[mi]["classification"] = slot + "*"
-            # The axis is already encoded in the classification string above
-            # (e.g. "Tx*"), so the annotation only adds the one piece of
-            # information it doesn't already carry: the vibration sub-label.
-            scored[mi]["annotation"] = f"vibration={vib_label(v, thresholds, scheme)}"
+    # ---- Step 3: bare slot name for every Step-2 winner ----
+    # WEBAPP DEVIATION from src/classifier.py (2026-09-03, matching
+    # JCC_man_scoring.pdf Table 4): the manuscript never applies a purity
+    # gate to the Hungarian assignment -- "-" in Table 4 means the
+    # assignment didn't pick a mode, not that it failed a gate, and neither
+    # tau_TR nor tau_purity appears anywhere in the paper. So every mode the
+    # assignment picks for a slot gets that bare slot name, full stop; no
+    # starred/mixed-external label is ever produced. gate2_bar/tau_TR/
+    # tau_purity/is_mixed_external/rescheme_external_label are kept (used by
+    # src/classifier.py's callers upstream) but no longer exercised here.
+    for mi, (slot, _score_value) in assignment.items():
+        scored[mi]["classification"] = slot
 
     # ---- Step 4: classify remaining (unassigned) internal modes ----
     for mi in range(n_modes):

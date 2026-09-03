@@ -203,19 +203,10 @@ def analyse(atoms, coords, bonds, modes, title="", source="", warnings=None,
         # Read the CLASSIFIER's verdict, not the displayed label: the default
         # view now calls every mode a stretch or a bend, so counting "TR" in
         # `label` would report zero assigned slots on a perfectly good 3N set.
-        starred = [r for r in vibrations if r["ext_label"].endswith("*")]
+        # No purity gate here (see classifier.py's Step 3 docstring), so
+        # every Step-2 winner is a bare slot name -- there is no
+        # starred/mixed-external case left to report.
         assigned = [r for r in vibrations if r["ext_label"][0] in "TR"]
-        if starred:
-            # Not a fault: a starred label is the algorithm reporting that the
-            # mode is genuinely part rigid-body motion and part vibration.
-            # Routine for EMIT, where T/R character is spread across the basis.
-            notes.append(
-                f"{len(starred)} mixed external"
-                + ("s" if len(starred) > 1 else "") + ": "
-                + ", ".join(f"{r['name']} {r['ext_label']}" for r in starred)
-                + ". Each is part rigid-body motion, part vibration. They are "
-                  "listed under T/R candidates and are labelled from s[V_S] "
-                  "like every other mode until you accept them.")
         if len(assigned) < n_ext:
             warnings.append(
                 f"Only {len(assigned)} of the {n_ext} external slots were "
@@ -302,24 +293,16 @@ def _row(m, vector, index, is_reference=False, is_emit=False, constructed=False)
     # views: the default one labels every mode from s[V_S] and so always marks
     # it, and the accepted-candidate view marks by the rules below.
     #
-    #   clean external (Tx..Rz)  -> that slot's score. The mode is a rigid-body
-    #                               motion; its s[V_S] is ~0 by the purity gate.
-    #   internal (S/B/SB)        -> s[V_S], the score the label is derived from.
-    #                               The T/R columns are diagnostics here, and
-    #                               highlighting an abs-max that lands there
-    #                               (43% of real modes) would assert external
-    #                               character the algorithm never assigned.
-    #   mixed external (Tx*..)   -> BOTH: s[V_S] and the largest |T/R|. The star
-    #                               means the mode failed the purity gate, i.e.
-    #                               it is genuinely part external and part
-    #                               vibration, so one number cannot describe it.
-    _TR = tuple(k for k in SCORE_KEYS if k != "V_S")
-
+    #   external (Tx..Rz)  -> that slot's score. No purity gate (see
+    #                         classifier.py's Step 3 docstring), so this is
+    #                         every Step-2 winner, not just a "clean" subset.
+    #   internal (S/B/SB)  -> s[V_S], the score the label is derived from.
+    #                         The T/R columns are diagnostics here, and
+    #                         highlighting an abs-max that lands there (43%
+    #                         of real modes) would assert external character
+    #                         the algorithm never assigned.
     def _highlights_for(lab):
-        is_external = lab[0] in "TR"
-        if is_external and lab.endswith("*"):
-            return ["V_S", max(_TR, key=lambda k: abs(scores[k]))]
-        if is_external:
+        if lab[0] in "TR":
             return [lab]
         return ["V_S"]
 
@@ -340,11 +323,11 @@ def _row(m, vector, index, is_reference=False, is_emit=False, constructed=False)
         "dominant_value": round(float(scores[dominant]), 4),
         "label": label,
         "label_text": _label_text(label),
-        # Empty in the default view: the annotation only ever qualified an
-        # external label, and there is none to qualify until one is accepted.
         "annotation": "",
         "ext_label": ext_label,
         "ext_label_text": _label_text(ext_label),
+        # Always "" -- classifier.py's Step 3 has no purity gate to annotate
+        # a failure of. Kept for shape parity with the JS/CSV consumers.
         "ext_annotation": m["annotation"],
         "ext_highlight": ext_highlights[0],
         "ext_highlights": ext_highlights,
@@ -362,8 +345,6 @@ def _row(m, vector, index, is_reference=False, is_emit=False, constructed=False)
 def _label_text(label):
     if label in LABEL_TEXT:
         return LABEL_TEXT[label]
-    if label.endswith("*"):
-        return f"mixed external ({label[:-1]}) + vibration"
     return f"external: {label}"
 
 

@@ -168,9 +168,12 @@
     of R<sub>x</sub>/R<sub>y</sub>/R<sub>z</sub> once the molecule is rotated into
     its principal frame. No single slot score is then high enough to win, so a real
     vibration can take the slot and a genuine rotation falls through to
-    <b class="lab B">B</b>. The app detects this: any external assignment that fails
-    the purity gate is reported with a starred label and a warning on the results
-    page. <code>examples/HCOOH_3N.vsc</code> is a clean 3N set to compare against.
+    <b class="lab B">B</b>. The assignment is a plain Hungarian pick with no purity
+    gate &mdash; matching the reference manuscript's Table 4, whose slot names carry
+    no star &mdash; so a slot going to a mixed mode isn't flagged separately; if fewer
+    than all six external slots are assigned, the results page still warns that the
+    file may not hold a complete set. <code>examples/HCOOH_3N.vsc</code> is a clean
+    3N set to compare against.
   </p>
 
   <h2>Why connectivity is mandatory</h2>

@@ -32,7 +32,6 @@
    * disagree about which view is showing. */
   function labOf(r)   { return useExt ? r.ext_label : r.label; }
   function labTxt(r)  { return useExt ? r.ext_label_text : r.label_text; }
-  function annOf(r)   { return useExt ? r.ext_annotation : r.annotation; }
   function hotOf(r)   { return useExt ? r.ext_highlights : r.highlights; }
   var BOND_HL = "#f2c14e";
   var cmpViews = [];           // one live 3Dmol viewer per compared mode
@@ -255,25 +254,15 @@
         // V_S on a real mode -- see pipeline._row. On a real mode the six T/R
         // numbers are dimmed: they are diagnostics, not the mode's assigned
         // character, and only these six reference modes carry T/R character.
-        // r.highlights follows the LABEL: one cell for a clean external or an
-        // internal mode, two for a mixed external (V_S + the largest |T/R|),
-        // which by definition is part vibration and part rigid-body motion.
+        // r.highlights follows the LABEL: one cell (external or internal --
+        // classifier.py's Step 3 has no purity gate, so every external is a
+        // single bare slot name, never a mixed one).
         if (hotOf(r).indexOf(k) !== -1) cls += " hot";
         else if (!r.is_reference && k !== "V_S") cls += " dim";
         cells += '<td class="' + cls + '">' + fmt(r.scores[k]) + "</td>";
       });
-      // A starred external carries its vibrational character as
-      // annotation="vibration=SB". Show that as a second chip rather than
-      // spelling it out: [Tx*] [SB].
-      var ann = "";
-      if (annOf(r)) {
-        var vm = /^vibration=(\w+)$/.exec(annOf(r));
-        ann = vm ? '<b class="lab ' + vm[1] + '">' + vm[1] + "</b>"
-                 : '<span class="ann">' + annOf(r) + "</span>";
-      }
       var lb = labOf(r);
-      cells += '<td><b class="lab ' + lb.replace("*", "x") + '">' + lb + "</b>" +
-               ann + "</td>" +
+      cells += '<td><b class="lab ' + lb + '">' + lb + "</b></td>" +
                "<td>" + (r.irrep || "—") + "</td>";
       tr.innerHTML = cells;
 
