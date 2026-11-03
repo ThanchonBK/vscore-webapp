@@ -15,7 +15,7 @@ from __future__ import annotations
 import numpy as np
 
 from .candidates import split_views
-from .classifier import Thresholds, classify_all_modes, is_linear
+from .classifier import Thresholds, classify_all_modes, is_linear, predicted_category
 from .parsers import ParseError, displacement_precision
 from .scoring import ModeScorer
 
@@ -156,6 +156,14 @@ def analyse(atoms, coords, bonds, modes, title="", source="", warnings=None,
         n_ref = len(scorer.construct_T()) + len(ideal_R)
 
     scored = classify_all_modes(scorer, final, thresholds)
+    # The classifier reports its two questions separately -- vib_label (S/B,
+    # every mode) and tr_label (the Hungarian slot a mode won, or None). The
+    # views below read the combined verdict, which is the classifier's own
+    # rule: the slot if the mode won one, else its vib_label. There is no
+    # purity gate and so nothing to annotate.
+    for m in scored:
+        m["classification"] = predicted_category(m["tr_label"], m["vib_label"])
+        m["annotation"] = ""
     # Split the classifier's single verdict into the two views the UI offers:
     # a stretch/bend label on EVERY mode, and the external assignment's picks
     # held aside as candidates. Neither re-runs the classifier -- see
@@ -247,11 +255,10 @@ def analyse(atoms, coords, bonds, modes, title="", source="", warnings=None,
             "tau_TR": thresholds.tau_TR,
             "tau_S": thresholds.tau_S,
             "tau_B": thresholds.tau_B,
-            # The operative cut points under the binary scheme the classifier
-            # now runs: tau_SB splits S from B in Step 4, tau_purity is Step
-            # 3's gate 2. tau_S/tau_B are kept for the three-way scheme.
+            # The operative cut point under the binary scheme the classifier
+            # runs: tau_SB splits S from B. tau_S/tau_B are kept for the
+            # three-way scheme; tau_TR gates nothing (diagnostic only).
             "tau_SB": thresholds.tau_SB,
-            "tau_purity": thresholds.tau_purity,
             "v_weighting": thresholds.v_weighting,
         },
         "precision_dp": dp,

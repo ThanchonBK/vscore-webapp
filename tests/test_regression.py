@@ -21,6 +21,7 @@ sys.path.insert(0, str(ROOT))
 
 from app.core.parsers import (ParseError, parse_connectivity,  # noqa: E402
                               parse_gaussian_log, parse_vsc, write_vsc)
+from app.core.classifier import predicted_category  # noqa: E402
 from app.core.pipeline import analyse  # noqa: E402
 
 def _find_reference_data():
@@ -78,13 +79,16 @@ def test_matches_reference(stem, log, com, csv_path):
             assert abs(float(expected[col]) - got["scores"][col]) < 5e-4, \
                 f"{stem} {got['name']} {col}"
         assert abs(float(expected["V_Stretch"]) - got["scores"]["V_S"]) < 5e-4
-        # ext_label, not label: reproducing the reference implementation is a
-        # claim about the CLASSIFIER's verdict, which ext_label carries
-        # verbatim. `label` is the stretch/bend view the UI shows before any
-        # T/R candidate is accepted -- a presentation choice made here, and
-        # never something scoring-functions published.
-        assert expected["label"] == got["ext_label"], \
-            f"{stem} {got['name']} label"
+        # The reference CSV publishes the classifier's two answers apart:
+        # vib_label (S/B, every mode) and tr_label (the slot a mode won, or
+        # empty). ext_label is the combined verdict -- slot if won, else
+        # vib_label -- and `label` is the stretch/bend view, which for every
+        # real mode is exactly vib_label. (A constructed ideal T/R reference
+        # keeps its slot in both views; see pipeline._row.)
+        assert predicted_category(expected["tr_label"], expected["vib_label"]) \
+            == got["ext_label"], f"{stem} {got['name']} ext_label"
+        if not got["name"] in ("Tx", "Ty", "Tz", "Rx", "Ry", "Rz"):
+            assert expected["vib_label"] == got["label"], f"{stem} {got['name']} vib_label"
 
 
 @pytest.mark.parametrize("stem,log,com,csv_path", molecules(),
@@ -399,13 +403,11 @@ def test_emit_vsc_matches_reference():
             assert abs(float(expected[col]) - got["scores"][col]) < 5e-4, \
                 f"{got['name']} {col}"
         assert abs(float(expected["V_Stretch"]) - got["scores"]["V_S"]) < 5e-4
-        # Compare axis only, not the star: data/results/C6H6_EMIT.csv is the
-        # reference implementation's output, which still runs Step 3's purity
-        # gate. This webapp deliberately doesn't (2026-09-03, matching
-        # JCC_man_scoring.pdf Table 4 -- see classifier.py's Step 3
-        # docstring), so a mode the reference starred can come back bare here
-        # while still winning the identical slot.
-        assert expected["label"].rstrip("*") == got["ext_label"], f"{got['name']}"
+        # Same two-column reading as test_matches_reference. EMIT modes are
+        # all real, so the stretch/bend view must equal vib_label on every row.
+        assert predicted_category(expected["tr_label"], expected["vib_label"]) \
+            == got["ext_label"], f"{got['name']}"
+        assert expected["vib_label"] == got["label"], f"{got['name']} vib_label"
 
     # A real EMIT eigenvector must be able to win a slot outright (not just
     # "*"-mixed) and be highlighted on that slot rather than V_S -- this is
