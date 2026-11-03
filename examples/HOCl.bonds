@@ -1,0 +1,3 @@
+# HOCl bonds, 1-based atom indices (O1 H2 Cl3)
+1 2   # O-H
+1 3   # O-Cl

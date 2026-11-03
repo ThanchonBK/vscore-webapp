@@ -12,8 +12,8 @@ Whether a mode is a rigid-body translation or rotation is asked separately, and
 answered separately. The Hungarian assignment still picks the six best matches
 for the external slots, but those picks are listed as **T/R candidates** rather
 than written into the table, each with its **related score** — the mode's own
-score in that slot's column. Accept them and they read `Tx` / `Tx*` exactly as
-the classifier labelled them; ignore them and every mode stays a stretch or a
+score in that slot's column. Accept them and they read `Tx` exactly as the
+classifier labelled them; ignore them and every mode stays a stretch or a
 bend. See [T/R candidates](#tr-candidates).
 
 The scoring core is a verbatim copy of the reference implementation in
@@ -32,11 +32,12 @@ Then open <http://127.0.0.1:8021>. API docs at `/docs`.
 
 ## Input
 
-Three paths, all converging on the same four values.
+Four paths, all converging on the same four values.
 
 | Path | Files |
 |---|---|
 | Gaussian | `.log` **+** `.com`/`.gjf` |
+| ORCA / Molpro / other | ORCA `.hess` or a Molden file **+** a bond file (`i j` list or `.com`) |
 | All-in-one | `.vsc` |
 | Convert | `.log` + `.com` → `.vsc`, from the results page or `make_vsc.py` |
 

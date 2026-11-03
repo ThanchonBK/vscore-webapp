@@ -187,6 +187,39 @@
     inferred from interatomic distances.
   </p>
 
+  <h2>ORCA and Molden input</h2>
+  <p>
+    The <b>ORCA / Molden + bonds</b> tab takes an ORCA <code>.hess</code> or any
+    Molden file with <code>[FREQ]</code>, <code>[FR-COORD]</code> and
+    <code>[FR-NORM-COORD]</code> sections (Molpro:
+    <code>put,molden,name.molden</code> after <code>frequencies</code>). Which one it
+    is is read from the content, not the extension. Coordinates in both are in bohr
+    and are converted to Å.
+  </p>
+  <ul>
+    <li><b>Zero modes.</b> Both may list all 3N modes, with the five or six
+        projected-out translations and rotations at 0&nbsp;cm<sup>&minus;1</sup>.
+        Those are dropped, leaving the same 3N&minus;6 (3N&minus;5) vibrations a
+        Gaussian log gives. Any other number of zero modes is refused.</li>
+    <li><b>Mass weighting.</b> <code>s[V<sub>S</sub>]</code> depends on how far each
+        atom moves relative to the others, so a mass-weighted vector scores
+        differently from a Cartesian one &mdash; on divinylbenzene, by up to 0.48,
+        flipping 8 of 54 labels. Normal modes are orthogonal as mass-weighted
+        vectors and, as Cartesian displacements, only under the mass metric; the
+        app checks which holds, converts to Cartesian if needed, and refuses
+        vectors that fit neither.</li>
+    <li><b>Bonds</b> come from a second file: a Gaussian <code>.com</code>/<code>.gjf</code>
+        with <code>geom=connectivity</code>, or a plain list in the
+        <code>[CONNECTIVITY]</code> row format below &mdash; <code>i j</code> per line
+        is enough, 1-based, <code>#</code> for comments. A bond order must carry a
+        decimal point (<code>1 3 2.0</code>): written <code>1 3 2</code> it reads as
+        atom 1 bonded to atoms 3 <em>and</em> 2.</li>
+  </ul>
+<pre># divinylbenzene, first few bonds
+1 3
+1 6
+1 12</pre>
+
   <h2>Precision</h2>
   <p>
     Write displacements at full precision — Gaussian <code>freq=hpmodes</code>, five

@@ -24,8 +24,9 @@ from fastapi.templating import Jinja2Templates
 
 from .config import (ALLOW_PASTE, IS_LOCAL, MAX_UPLOAD_BYTES, SCORE_KEYS, SITE_NOTE,
                      STATIC_DIR, TEMPLATES_DIR, VERSION, asset_version)
-from .core.parsers import (ParseError, parse_connectivity, parse_gaussian_log,
-                           parse_vsc, write_vsc)
+from .core.parsers import (ParseError, parse_bond_file, parse_connectivity,
+                           parse_frequency_file, parse_gaussian_log, parse_vsc,
+                           write_vsc)
 from .core.pipeline import analyse, to_csv_rows
 
 app = FastAPI(
@@ -61,17 +62,21 @@ async def _read(upload: UploadFile | None, what: str) -> str | None:
     if len(data) > MAX_UPLOAD_BYTES:
         raise ParseError(
             f"{what} is {len(data)/1e6:.1f} MB, over the {MAX_UPLOAD_BYTES/1e6:.1f} MB "
-            "limit. Gaussian logs are mostly SCF iterations the scorer never reads -- "
-            "convert to a .vsc file locally with make_vsc.py and upload that instead "
-            "(typically a few kB).")
+            "limit. Most of a Gaussian log (SCF iterations) or an ORCA .hess (the "
+            "Hessian itself) is never read by the scorer -- convert to a .vsc file "
+            "locally with make_vsc.py and upload that instead (typically a few kB).")
     try:
-        return data.decode("utf-8", errors="replace")
+        # utf-8-sig drops the byte-order mark Windows editors prepend; left in,
+        # it hides a Molden file's '[Molden Format]' header and turns a bond
+        # list's first index into a non-number.
+        return data.decode("utf-8-sig", errors="replace")
     except Exception:
         raise ParseError(f"{what} could not be read as text.")
 
 
 def _build(mode, log_text, com_text, vsc_text, log_name, com_name, vsc_name,
-           pasted=None, arb_text=None, arb_name=None):
+           pasted=None, arb_text=None, arb_name=None,
+           qc_text=None, qc_name=None, bond_text=None, bond_name=None):
     """Route the three input paths onto one payload.
 
     Returns ``(payload, raw)``. ``raw`` keeps the geometry and displacements
@@ -114,6 +119,23 @@ def _build(mode, log_text, com_text, vsc_text, log_name, com_name, vsc_name,
         payload = analyse(v["atoms"], v["coords"], v["bonds"], v["modes"],
                           title=v["title"] or _stem(vsc_name),
                           source=vsc_name or "uploaded .vsc")
+        return payload, raw
+
+    if mode == "qc":
+        if not qc_text:
+            raise ParseError("No ORCA .hess or Molden file was uploaded.")
+        if not bond_text:
+            raise ParseError(
+                "No bond file was uploaded. ORCA .hess and Molden files carry no "
+                "connectivity, and the V-score is a sum over bonds, so a bond list "
+                "(or a Gaussian .com/.gjf with geom=connectivity) is required.")
+        g = parse_frequency_file(qc_text)
+        bonds = parse_bond_file(bond_text, len(g["atoms"]), bond_name or "")
+        raw = {"atoms": g["atoms"], "coords": g["coords"],
+               "bonds": bonds, "modes": g["modes"]}
+        payload = analyse(g["atoms"], g["coords"], bonds, g["modes"],
+                          title=_stem(qc_name),
+                          source=f"{qc_name} + {bond_name}")
         return payload, raw
 
     if not log_text:
@@ -183,6 +205,8 @@ async def score(
     vscfile: UploadFile | None = File(None),
     pasted: str = Form(""),
     arbfile: UploadFile | None = File(None),
+    qcfile: UploadFile | None = File(None),
+    bondfile: UploadFile | None = File(None),
 ):
     try:
         payload, raw = _build(
@@ -196,6 +220,10 @@ async def score(
             pasted=pasted,
             arb_text=await _read(arbfile, "The .vsc file"),
             arb_name=arbfile.filename if arbfile else None,
+            qc_text=await _read(qcfile, "The ORCA/Molden file"),
+            qc_name=qcfile.filename if qcfile else None,
+            bond_text=await _read(bondfile, "The bond file"),
+            bond_name=bondfile.filename if bondfile else None,
         )
     except ParseError as exc:
         return templates.TemplateResponse(
@@ -259,6 +287,8 @@ async def api_score(
     vscfile: UploadFile | None = File(None),
     pasted: str = Form(""),
     arbfile: UploadFile | None = File(None),
+    qcfile: UploadFile | None = File(None),
+    bondfile: UploadFile | None = File(None),
 ):
     try:
         payload, _raw = _build(
@@ -272,6 +302,10 @@ async def api_score(
             pasted=pasted,
             arb_text=await _read(arbfile, "The .vsc file"),
             arb_name=arbfile.filename if arbfile else None,
+            qc_text=await _read(qcfile, "The ORCA/Molden file"),
+            qc_name=qcfile.filename if qcfile else None,
+            bond_text=await _read(bondfile, "The bond file"),
+            bond_name=bondfile.filename if bondfile else None,
         )
     except ParseError as exc:
         raise HTTPException(status_code=400, detail=str(exc))

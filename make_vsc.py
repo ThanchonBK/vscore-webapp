@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
-"""make_vsc.py -- convert Gaussian .log + .com pairs into .vsc files.
+"""make_vsc.py -- convert Gaussian .log + .com pairs (or an ORCA .hess / Molden
+file + a bond file) into .vsc files.
 
 The webapp offers a .vsc download on every result page; this is the same
 conversion for batch work, e.g. on the compute server.
 
     python make_vsc.py HOCl.log HOCl.com -o HOCl.vsc
+    python make_vsc.py HOCl.hess HOCl.bonds -o HOCl.vsc      # ORCA
+    python make_vsc.py HOCl.molden HOCl.bonds -o HOCl.vsc    # Molpro etc.
     python make_vsc.py --batch data/logs data/gjf -o vsc/
 
 In batch mode every ``<stem>.log`` is paired with ``<stem>.com`` or
@@ -20,13 +23,20 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from app.core.parsers import (ParseError, parse_connectivity,  # noqa: E402
+from app.core.parsers import (ParseError, parse_bond_file,  # noqa: E402
+                              parse_connectivity, parse_frequency_file,
                               parse_gaussian_log, write_vsc)
 
 
 def convert(log_path: Path, com_path: Path) -> str:
-    g = parse_gaussian_log(log_path.read_text(errors="replace"))
-    bonds = parse_connectivity(com_path.read_text(errors="replace"), len(g["atoms"]))
+    text = log_path.read_text(errors="replace")
+    if log_path.suffix.lower() in (".hess", ".molden", ".mold"):
+        g = parse_frequency_file(text)
+        bonds = parse_bond_file(com_path.read_text(errors="replace"), len(g["atoms"]),
+                                com_path.name)
+    else:
+        g = parse_gaussian_log(text)
+        bonds = parse_connectivity(com_path.read_text(errors="replace"), len(g["atoms"]))
     return write_vsc(g["atoms"], g["coords"], bonds, g["modes"],
                      title=log_path.stem,
                      source=f"{log_path.name} + {com_path.name}")
@@ -43,8 +53,10 @@ def find_deck(gjf_dir: Path, stem: str) -> Path | None:
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("log", nargs="?", help="Gaussian output file")
-    ap.add_argument("com", nargs="?", help="Gaussian input deck (connectivity)")
+    ap.add_argument("log", nargs="?",
+                    help="Gaussian output file, or an ORCA .hess / Molden file")
+    ap.add_argument("com", nargs="?",
+                    help="Gaussian input deck, or a bond file for .hess/.molden")
     ap.add_argument("-o", "--out", help="output .vsc file, or directory in --batch mode")
     ap.add_argument("--batch", nargs=2, metavar=("LOGDIR", "GJFDIR"),
                     help="convert every .log in LOGDIR paired with its deck in GJFDIR")

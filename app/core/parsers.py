@@ -13,11 +13,18 @@ Frequency, reduced mass, force constant and irrep ride along as row metadata;
 the scorer never reads them. The Cartesian Hessian -- the largest block in a
 VEDA .fmt -- is not needed at all and is not parsed.
 
-Three readers:
+Readers:
   * ``parse_gaussian_log``  geometry + modes from a .log (NO connectivity --
     Gaussian does not print it in the output; it lives in the input deck)
   * ``parse_connectivity``  bonds from a .com/.gjf deck
+  * ``parse_orca_hess``     geometry + modes from an ORCA .hess
+  * ``parse_molden``        geometry + modes from a Molden file (Molpro and others)
+  * ``parse_bond_file``     bonds for those two, from a .com/.gjf or a bond list
   * ``parse_vsc``           all four from one .vsc file
+
+The ORCA and Molden readers also bring their vectors to the Gaussian
+convention (unit-norm Cartesian displacements, 3N-6 or 3N-5 of them), so
+everything downstream sees one shape whichever program wrote the file.
 
 and one writer, ``write_vsc``, so a run can be replayed from a single small
 file. The writer stores the ORIGINAL geometry, not the principal-axis-aligned
@@ -296,6 +303,409 @@ def _is_int(s):
 
 
 # ======================================================================
+# Path 3: ORCA .hess / Molden  ->  atoms, coords, modes
+# ======================================================================
+# Neither format carries connectivity, so -- exactly as for a Gaussian .log --
+# the bonds come from a separate file (``parse_bond_file``) and are never
+# inferred from distances.
+BOHR_TO_ANGSTROM = 0.529177210903
+
+# A non-orthogonality above this, under the best-fitting metric, means the
+# vectors are not normal modes of one Hessian (or were mis-parsed). Gaussian's
+# 5-dp hpmodes already reach 7.5e-3 on heavy-atom molecules (PCl3, SeBr2), and
+# 4-dp writers more; unrelated vectors overlap at O(0.1-1).
+_ORTHO_TOL = 5e-2
+# How much better the mass-weighted reading must fit before vectors are
+# converted; anything less is ambiguous and stays Cartesian.
+_DECISIVE = 3.0
+
+
+def parse_orca_hess(text):
+    """Geometry and normal modes from an ORCA ``.hess`` file.
+
+    Reads ``$atoms`` (symbol, mass, x y z in bohr), ``$vibrational_frequencies``
+    and ``$normal_modes`` (a 3N x 3N matrix, one mode per column, printed in
+    column blocks). ORCA documents these columns as Cartesian displacements,
+    normalised -- the same convention as Gaussian -- which
+    ``_cartesian_modes`` confirms from the vectors themselves rather than
+    trusting. The Hessian block is not needed and is not parsed.
+
+    Returns ``{'atoms', 'coords', 'modes'}``; no 'bonds', see above.
+    """
+    sections = _dollar_sections(text)
+    for req in ("atoms", "vibrational_frequencies", "normal_modes"):
+        if req not in sections:
+            raise ParseError(
+                f"No ${req} block found. This does not look like an ORCA .hess file "
+                "from a frequency calculation.")
+
+    rows = sections["atoms"]
+    try:
+        natoms = int(rows[0].split()[0])
+    except (IndexError, ValueError):
+        raise ParseError("The $atoms block does not start with an atom count.")
+    if natoms < 1:
+        raise ParseError("The $atoms block declares no atoms.")
+    atoms, coords, masses = [], [], []
+    for n, line in enumerate(rows[1:natoms + 1], 1):
+        parts = line.split()
+        if len(parts) < 5:
+            raise ParseError(f"$atoms line {n} should read 'symbol mass x y z': {line!r}")
+        atoms.append(_element(parts[0], f"$atoms line {n}"))
+        mass, *xyz = _numbers(parts[1:5], f"$atoms line {n}")
+        if mass <= 0:
+            raise ParseError(f"$atoms line {n}: mass {mass} is not positive.")
+        masses.append(mass)
+        coords.append([v * BOHR_TO_ANGSTROM for v in xyz])
+    if len(atoms) != natoms:
+        raise ParseError(f"$atoms declares {natoms} atoms but lists {len(atoms)}.")
+
+    freqs = []
+    for line in sections["vibrational_frequencies"][1:]:
+        parts = line.split()
+        if len(parts) >= 2:
+            freqs.append(_numbers(parts[1:2], "$vibrational_frequencies")[0])
+    ncoord = 3 * natoms
+    if len(freqs) != ncoord:
+        raise ParseError(
+            f"$vibrational_frequencies lists {len(freqs)} values, expected 3N = {ncoord}.")
+
+    matrix = _orca_column_blocks(sections["normal_modes"], ncoord)
+    modes = [{"frequency": freqs[k], "vector": matrix[:, k].reshape(natoms, 3),
+              "is_emit": False, "reduced_mass": None, "force_constant": None,
+              "irrep": None} for k in range(ncoord)]
+    modes = _drop_projected_modes(modes, natoms, np.array(coords))
+    _cartesian_modes(modes, np.array(masses), "ORCA .hess")
+    return {"atoms": atoms, "coords": np.array(coords), "modes": modes}
+
+
+def _dollar_sections(text):
+    """'$name' blocks of an ORCA .hess -> {name: [non-blank lines]}.
+
+    ORCA puts '#' comment lines between and inside blocks (e.g. '# The atoms:
+    label  mass x y z'); they are dropped.
+    """
+    sections, current = {}, None
+    for line in text.splitlines():
+        s = line.strip()
+        if s.startswith("#"):
+            continue
+        if s.startswith("$"):
+            current = s[1:].split()[0].lower() if len(s) > 1 else None
+            if current == "end":
+                break
+            sections[current] = []
+        elif current and s:
+            sections[current].append(s)
+    return sections
+
+
+def _orca_column_blocks(lines, ncoord):
+    """The '$normal_modes' matrix: a 'rows cols' line, then blocks of columns,
+    each a header of column indices followed by 'row v v v ...' lines."""
+    try:
+        nrow, ncol = (int(v) for v in lines[0].split()[:2])
+    except (IndexError, ValueError):
+        raise ParseError("$normal_modes does not start with its 'rows cols' dimensions.")
+    if nrow != ncoord or ncol != ncoord:
+        raise ParseError(
+            f"$normal_modes is {nrow} x {ncol}, but the geometry needs {ncoord} x {ncoord}.")
+
+    matrix = np.full((ncoord, ncoord), np.nan)
+    cols = []
+    for line in lines[1:]:
+        parts = line.split()
+        if all(_is_int(p) for p in parts):          # a column-index header
+            cols = [int(p) for p in parts]
+            if len(set(cols)) != len(cols) or not all(0 <= c < ncoord for c in cols):
+                raise ParseError(f"$normal_modes has an invalid column header: {line!r}")
+            continue
+        if not _is_int(parts[0]):
+            raise ParseError(f"$normal_modes has an unreadable line: {line!r}")
+        row = int(parts[0])
+        vals = _numbers(parts[1:], "$normal_modes")
+        if len(vals) != len(cols) or not 0 <= row < ncoord:
+            raise ParseError(f"$normal_modes line does not match its block header: {line!r}")
+        matrix[row, cols] = vals
+    if np.isnan(matrix).any():
+        raise ParseError("$normal_modes is incomplete -- the file looks truncated.")
+    return matrix
+
+
+_MOLDEN_SECTION_RE = re.compile(r"^\s*\[([A-Za-z0-9_\- ]+)\]\s*(.*)$")
+
+
+def parse_molden(text):
+    """Geometry and normal modes from the vibrational part of a Molden file.
+
+    Reads ``[FREQ]``, ``[FR-COORD]`` (symbol x y z, bohr) and
+    ``[FR-NORM-COORD]`` (one 'vibration n' header per mode, then N rows of
+    dx dy dz). This covers Molpro (``put,molden``) and any other program that
+    writes the format. Writers disagree on whether the vectors are mass-weighted,
+    and the format does not say, so the convention is detected from the vectors
+    (``_cartesian_modes``) and converted to Cartesian if needed. The [Atoms],
+    [GTO] and [MO] sections are not read: [FR-COORD] is the geometry the modes
+    belong to.
+
+    Returns ``{'atoms', 'coords', 'modes'}``; no 'bonds'.
+    """
+    sections, current = {}, None
+    for line in text.splitlines():
+        m = _MOLDEN_SECTION_RE.match(line)
+        if m:
+            current = m.group(1).strip().upper()
+            sections[current] = []
+            continue
+        if current and line.strip():
+            sections[current].append(line.strip())
+
+    if not text.lstrip().upper().startswith("[MOLDEN FORMAT]"):
+        raise ParseError("This does not look like a Molden file (no '[Molden Format]' header).")
+    for req in ("FREQ", "FR-COORD", "FR-NORM-COORD"):
+        if req not in sections:
+            raise ParseError(
+                f"No [{req}] section. The Molden file has no vibrational data -- write "
+                "it after a frequency calculation (Molpro: 'put,molden' after 'frequencies').")
+
+    atoms, coords = [], []
+    for n, line in enumerate(sections["FR-COORD"], 1):
+        parts = line.split()
+        if len(parts) < 4:
+            raise ParseError(f"[FR-COORD] line {n} should read 'symbol x y z': {line!r}")
+        atoms.append(_element(parts[0], f"[FR-COORD] line {n}"))
+        coords.append([v * BOHR_TO_ANGSTROM
+                       for v in _numbers(parts[1:4], f"[FR-COORD] line {n}")])
+    natoms = len(atoms)
+    if natoms == 0:
+        raise ParseError("[FR-COORD] is empty.")
+
+    freqs = [_numbers(line.split()[:1], "[FREQ]")[0] for line in sections["FREQ"]]
+
+    vectors, rows = [], None
+    for line in sections["FR-NORM-COORD"]:
+        if line.lower().startswith("vibration"):
+            if rows is not None:
+                vectors.append(rows)
+            rows = []
+            continue
+        if rows is None:
+            raise ParseError(f"[FR-NORM-COORD] row before any 'vibration' header: {line!r}")
+        parts = line.split()
+        if len(parts) < 3:
+            raise ParseError(f"[FR-NORM-COORD] row is not three numbers: {line!r}")
+        rows.append(_numbers(parts[:3], "[FR-NORM-COORD]"))
+    if rows is not None:
+        vectors.append(rows)
+
+    if len(vectors) != len(freqs):
+        raise ParseError(
+            f"[FREQ] lists {len(freqs)} frequencies but [FR-NORM-COORD] holds "
+            f"{len(vectors)} vibrations.")
+    bad = [k + 1 for k, v in enumerate(vectors) if len(v) != natoms]
+    if bad:
+        raise ParseError(
+            f"Vibration {bad[0]} has the wrong number of rows for {natoms} atoms in "
+            "[FR-COORD].")
+
+    modes = [{"frequency": f, "vector": np.array(v), "is_emit": False,
+              "reduced_mass": None, "force_constant": None, "irrep": None}
+             for f, v in zip(freqs, vectors)]
+    modes = _drop_projected_modes(modes, natoms, np.array(coords))
+    masses = np.array([atomicMass[a.lower()] for a in atoms])
+    _cartesian_modes(modes, masses, "Molden file")
+    return {"atoms": atoms, "coords": np.array(coords), "modes": modes}
+
+
+def _numbers(tokens, where):
+    """Finite floats, or a ParseError naming the offending token.
+
+    NaN and inf are refused, not just non-numbers: a NaN coordinate makes the
+    linearity SVD fail to converge, and a NaN frequency cannot be serialised to
+    the JSON the result page is built from -- both would surface as a 500.
+    """
+    out = []
+    for tok in tokens:
+        try:
+            v = float(tok)
+        except ValueError:
+            raise ParseError(f"{where}: {tok!r} is not a number.")
+        if not np.isfinite(v):
+            raise ParseError(f"{where}: {tok!r} is not a finite number.")
+        out.append(v)
+    return out
+
+
+def _element(tok, where):
+    """Element symbol from a token like 'C', 'cl', 'C1' or '6'."""
+    if tok.isdigit():
+        sym = get_symbol(int(tok))
+        if sym != "X":
+            return sym
+    else:
+        sym = re.sub(r"[^A-Za-z]", "", tok).capitalize()
+        if sym.lower() in atomicMass:
+            return sym
+    raise ParseError(
+        f"{where}: unrecognised element {tok!r}; no atomic mass on file. Element "
+        "identity affects all seven scores, so this cannot be defaulted.")
+
+
+def _is_linear(coords, tol=1e-3):
+    centred = coords - coords.mean(axis=0)
+    if len(coords) < 3:
+        return True
+    return np.linalg.svd(centred, compute_uv=False)[1] < tol
+
+
+def _drop_projected_modes(modes, natoms, coords):
+    """Remove the projected-out translations/rotations a 3N listing carries.
+
+    ORCA (and some Molden writers) list all 3N modes, with the 5-6 external
+    ones set to exactly 0 cm-1 -- as all-zero vectors in a .hess, as real T/R
+    vectors in symmetry-adapted runs. Those are dropped so the result has the
+    same 3N-6 / 3N-5 vibrations a Gaussian log does. A set with no zeros is
+    passed through untouched (a 3N set with unprojected T/R, or vibrations
+    only), and the pipeline's own mode-set detection decides what it is.
+    """
+    zero = [k for k, m in enumerate(modes)
+            if abs(m["frequency"]) < 1e-3 or not np.any(m["vector"])]
+    if not zero:
+        return modes
+    n_ext = 5 if _is_linear(coords) else 6
+    if len(zero) > n_ext and zero[:n_ext] == list(range(n_ext)):
+        # ORCA always lists the external modes first, then any imaginary ones,
+        # then the rest; a genuine vibration that prints as 0.00 can follow.
+        # Drop by position and keep it -- unless its vector is empty too.
+        zero = zero[:n_ext]
+        if any(not np.any(m["vector"]) for k, m in enumerate(modes) if k not in zero):
+            raise ParseError(
+                "A mode after the translations and rotations has an all-zero "
+                "displacement vector, so it cannot be scored.")
+    if len(zero) != n_ext:
+        raise ParseError(
+            f"Found {len(zero)} zero-frequency modes; a {'linear' if n_ext == 5 else 'nonlinear'} "
+            f"molecule has {n_ext} translations and rotations. Either the Hessian was not "
+            "projected cleanly or the file is mis-parsed, so these are not dropped by guesswork.")
+    keep = [m for k, m in enumerate(modes) if k not in zero]
+    if len(keep) != 3 * natoms - n_ext:
+        raise ParseError(
+            f"After removing {n_ext} zero modes, {len(keep)} remain; expected "
+            f"{3 * natoms - n_ext}.")
+    return keep
+
+
+def _cartesian_modes(modes, masses, what):
+    """Make every vector a unit-norm Cartesian displacement, in place.
+
+    s[V_S] is invariant to a mode's overall scale but not to the RELATIVE
+    displacement of its atoms, so a mass-weighted vector (q = M^1/2 x) scores
+    differently from the Cartesian one Gaussian prints. Which one a file holds
+    is read off the vectors with two independent tests:
+
+      * orthogonality -- normal modes are orthogonal as mass-weighted vectors
+        (Q^T Q diagonal), and as Cartesian displacements only under the mass
+        metric (X^T M X diagonal);
+      * zero net momentum (Eckart) -- a vibration has sum_i m_i x_i = 0 as a
+        Cartesian displacement, sum_i sqrt(m_i) q_i = 0 when mass-weighted.
+
+    Either test alone can be blind: in a linear molecule or a set with one mode
+    per irrep, symmetry makes the vectors orthogonal under both metrics, and
+    with near-equal masses both tests barely differ. So vectors are converted
+    only when the mass-weighted reading fits DECISIVELY better on the two tests
+    combined; otherwise they are taken as Cartesian, the convention both ORCA
+    and the Molden format document. Vectors orthogonal under neither metric are
+    not normal modes of one Hessian and are refused.
+
+    The precision the file was written at is measured before anything is
+    rescaled and kept on each mode as ``source_dp``, so the low-precision
+    warning still reflects the file rather than the normalised floats.
+    """
+    X = np.array([np.asarray(m["vector"], float).ravel() for m in modes]).T
+    if not np.isfinite(X).all():
+        raise ParseError(f"The {what} holds non-numeric (NaN/inf) displacements.")
+    dp = displacement_precision(modes)
+    convert = False
+    if len(modes) >= 2 and np.ptp(masses) > 0:
+        m3 = np.repeat(masses, 3)
+        # numpy 2.x on macOS Accelerate raises spurious FP warnings from matmul
+        # on finite input; the inputs were just checked finite, so silence them.
+        with np.errstate(all="ignore"):
+            off_cart = _offdiag(X.T @ (m3[:, None] * X))
+            off_mw = _offdiag(X.T @ X)
+        if min(off_cart, off_mw) > _ORTHO_TOL:
+            raise ParseError(
+                f"The {what}'s mode vectors are not mutually orthogonal under either the "
+                f"Cartesian or the mass-weighted convention (worst overlaps {off_cart:.3f} / "
+                f"{off_mw:.3f}). They are not normal modes of one Hessian, or the file was "
+                "mis-parsed.")
+        mw_fit = off_mw + _net_momentum(X, np.sqrt(masses))
+        cart_fit = off_cart + _net_momentum(X, masses)
+        convert = mw_fit * _DECISIVE < cart_fit
+    if convert:
+        for m in modes:
+            m["vector"] = np.asarray(m["vector"], float) / np.sqrt(masses)[:, None]
+    _normalise(modes)
+    for m in modes:
+        m["source_dp"] = dp
+
+
+def _net_momentum(X, weights):
+    """Median over modes of |sum_i w_i x_i| / sum_i w_i |x_i| -- ~0 when the
+    weighting matches the vectors' convention. The median, not the max, so the
+    rigid translations a 3N set may carry do not swamp the vibrations."""
+    n = len(weights)
+    per_mode = []
+    for k in range(X.shape[1]):
+        x = X[:, k].reshape(n, 3) * weights[:, None]
+        scale = np.abs(x).sum()
+        per_mode.append(np.linalg.norm(x.sum(axis=0)) / scale if scale > 0 else 0.0)
+    return float(np.median(per_mode))
+
+
+def _offdiag(G):
+    d = np.sqrt(np.clip(np.diag(G), 1e-300, None))
+    C = G / np.outer(d, d)
+    np.fill_diagonal(C, 0.0)
+    return float(np.abs(C).max())
+
+
+def _normalise(modes):
+    for m in modes:
+        v = np.asarray(m["vector"], float)
+        n = np.linalg.norm(v)
+        m["vector"] = v / n if n > 0 else v
+
+
+def parse_frequency_file(text):
+    """ORCA .hess or Molden, told apart by content rather than file extension."""
+    if text.lstrip().upper().startswith("[MOLDEN FORMAT]"):
+        return parse_molden(text)
+    if "$normal_modes" in text or "$orca_hessian_file" in text:
+        return parse_orca_hess(text)
+    raise ParseError(
+        "Not recognised as an ORCA .hess file (no $normal_modes block) or a Molden "
+        "file (no '[Molden Format]' header). For a Gaussian .log use the Gaussian tab.")
+
+
+def parse_bond_file(text, natoms, name=""):
+    """Bonds for the ORCA/Molden path, from either kind of file.
+
+    A Gaussian ``.com``/``.gjf`` deck is read by ``parse_connectivity``.
+    Anything else is a plain bond list in the .vsc ``[CONNECTIVITY]`` row
+    format -- ``center partner partner ...``, 1-based, so ``i j`` per line
+    works too; '#' starts a comment and an optional ``[CONNECTIVITY]`` header
+    line is skipped.
+    """
+    if name.lower().endswith((".com", ".gjf")):
+        return parse_connectivity(text, natoms)
+    lines = [_strip(line) for line in text.splitlines()]
+    lines = [line for line in lines if line and not _SECTION_RE.match(line)]
+    if not lines:
+        raise ParseError("The bond file is empty -- at least one bond is required.")
+    return _parse_vsc_connectivity(lines, natoms)
+
+
+# ======================================================================
 # Path 2: the all-in-one .vsc file
 # ======================================================================
 _SECTION_RE = re.compile(r"^\s*\[([A-Za-z_]+)\]\s*(.*)$")
@@ -522,9 +932,19 @@ def write_vsc(atoms, coords, bonds, modes, title="", source=""):
         out.append(f"#SOURCE  {source}")
     out.append("")
 
+    # Gaussian data is exact at 6 dp (geometry) and 5 dp (hpmodes) and is
+    # written exactly as before. Data from ORCA/Molden carries more digits,
+    # and truncating them would not round-trip: the T/R scores can move on a
+    # 1e-6 A change in geometry (the principal-axis frame is ill-conditioned
+    # for symmetric molecules), so as many digits are kept as the data needs.
+    cdp = _needed_dp(coords, 6)
+    vdp = _needed_dp([np.asarray(m["vector"]) for m in modes], 5)
+    cw, vw = cdp + 8, vdp + 7
+
     out.append("[GEOMETRY] Angstrom")
     for i, (sym, xyz) in enumerate(zip(atoms, coords), 1):
-        out.append(f"{i:5d}  {sym:<2s} {xyz[0]:14.6f} {xyz[1]:14.6f} {xyz[2]:14.6f}")
+        out.append(f"{i:5d}  {sym:<2s} {xyz[0]:{cw}.{cdp}f} {xyz[1]:{cw}.{cdp}f} "
+                   f"{xyz[2]:{cw}.{cdp}f}")
     out.append("")
 
     out.append("[CONNECTIVITY]")
@@ -553,9 +973,20 @@ def write_vsc(atoms, coords, bonds, modes, title="", source=""):
             meta.append(f"irrep={m['irrep']}")
         out.append(f"  mode {n}" + ("   " + "   ".join(meta) if meta else ""))
         for i, d in enumerate(np.asarray(m["vector"]), 1):
-            out.append(f"{i:5d} {d[0]:12.5f} {d[1]:12.5f} {d[2]:12.5f}")
+            out.append(f"{i:5d} {d[0]:{vw}.{vdp}f} {d[1]:{vw}.{vdp}f} {d[2]:{vw}.{vdp}f}")
     out.append("")
     return "\n".join(out)
+
+
+def _needed_dp(arrays, least, most=15):
+    """Fewest decimals in [least, most] that reproduce every value exactly
+    (15 is lossless for any coordinate or displacement this pipeline sees)."""
+    vals = np.concatenate([np.asarray(a, float).ravel() for a in arrays]) if len(arrays) else np.zeros(0)
+    for dp in range(least, most):
+        # exact: the printed value must read back as the identical float
+        if all(float(f"{v:.{dp}f}") == v for v in vals):
+            return dp
+    return most
 
 
 # ======================================================================
@@ -572,6 +1003,9 @@ def displacement_precision(modes, sample=4000):
     0.31 on a [-1,1] scale (V and the S/B/SB labels survive, since the
     stretch/bend gap is 0.73 wide).
     """
+    recorded = [m["source_dp"] for m in modes if m.get("source_dp") is not None]
+    if recorded:                     # measured before an ORCA/Molden rescale
+        return min(recorded)
     vals = []
     for m in modes:
         vals.extend(np.asarray(m["vector"]).ravel().tolist())

@@ -22,6 +22,7 @@
   <form method="post" action="/score" enctype="multipart/form-data" id="form">
     <div class="tabs" role="tablist">
       <button type="button" class="tab on" data-mode="log" role="tab">Gaussian .log + .com</button>
+      <button type="button" class="tab" data-mode="qc" role="tab">ORCA / Molden + bonds</button>
       <button type="button" class="tab" data-mode="vsc" role="tab">Single .vsc file</button>
       {% if allow_paste %}
       <button type="button" class="tab" data-mode="paste" role="tab">Arbitrary vibrations</button>
@@ -45,6 +46,29 @@
       <p class="note">
         Both are required: a <code>.log</code> holds no bond list, and
         <code>V_S</code> is a sum over bonds. Connectivity is asked for, never guessed.
+      </p>
+    </section>
+
+    <section class="panel" id="p-qc">
+      <div class="grid2">
+        <label class="drop">
+          <span class="k">ORCA .hess or Molden file</span>
+          <input type="file" name="qcfile" accept=".hess,.molden,.mold,.txt">
+          <span class="hint">geometry + displacement vectors</span>
+        </label>
+        <label class="drop">
+          <span class="k">Bond file</span>
+          <input type="file" name="bondfile" accept=".txt,.bonds,.com,.gjf">
+          <span class="hint">one bond per line, <code>i j</code> (1-based) &mdash; or a <code>.com</code></span>
+        </label>
+      </div>
+      <p class="note">
+        ORCA writes the <code>.hess</code> next to every frequency job. Molpro writes a
+        Molden file with <code>put,molden,name.molden</code> after
+        <code>frequencies</code>; other programs that write Molden work too. Neither
+        format holds a bond list, so the bonds are uploaded, never guessed.
+        Mass-weighted vectors are detected and converted to Cartesian displacements.
+        <a href="/format">Format spec →</a>
       </p>
     </section>
 
