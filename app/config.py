@@ -43,7 +43,7 @@ def asset_version():
     change whenever the file does, so a normal reload picks it up.
     """
     stamp = 0
-    for name in ("app.css", "app.js"):
+    for name in ("app.css", "app.js", "settings.js"):
         f = STATIC_DIR / name
         if f.exists():
             stamp = max(stamp, int(f.stat().st_mtime))

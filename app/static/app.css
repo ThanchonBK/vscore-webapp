@@ -558,5 +558,19 @@ sup.amb, b.amb { color:var(--hot-ink); background:var(--hot-bg); border-radius:3
 .cands .cnote { font-size:12px; margin:6px 0 0; }
 .opts { margin:14px 0 4px; }
 .opts summary { cursor:pointer; color:var(--ink-2); font-size:13px; }
-.settings .frame-fields { border:0; padding:0; margin:0; background:none; }
+/* The frame controls sit INSIDE the one settings box, as their own row
+   (flex-basis 100%), with a hairline above instead of a second box. */
+.settings .frame-fields { border:0; border-top:1px solid var(--line); border-radius:0;
+  padding:8px 0 0; margin:0; background:none; flex-basis:100%; }
 .settings select { font:inherit; background:var(--bg); color:var(--ink); border:1px solid var(--line); border-radius:4px; }
+/* a control that starts its own line in a flex settings row. Done on the item
+   itself: an empty zero-height break item gets the row gap on both sides,
+   doubling the space above the line. */
+.settings label.own-line { flex-basis:100%; }
+/* the result page's settings box lines up with the blocks around it */
+#rescore { max-width:1400px; margin:0 auto 12px; }
+/* The action row closes the whole settings box (both rows), so "reset all
+   settings" visibly applies to everything above it, not one line. */
+.settings .settings-actions { flex-basis:100%; display:flex; flex-wrap:wrap; align-items:center;
+  justify-content:flex-end; gap:8px 12px; border-top:1px solid var(--line); padding-top:8px; }
+.settings .settings-actions .push-left { margin-right:auto; }

@@ -1409,4 +1409,4 @@ def test_borderline_tooltip_names_the_band_actually_used(tmp_path):
     assert titles, "no borderline marks rendered"
     for t in titles:
         assert "null" not in t and "undefined" not in t, t
-        assert "0.32–0.53" in t, t
+        assert "0.33–0.53" in t, t

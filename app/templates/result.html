@@ -13,7 +13,7 @@
     <span title="single stretch/bend cut point on s[V_S]: at or above is S, below is B">
       τ<sub>SB</sub> {{ "%.2f"|format(p.thresholds.tau_SB) }}{% if p.thresholds.tau_SB_overridden %}
       <i class="muted">(calibrated {{ "%.2f"|format(p.thresholds.tau_SB_calibrated) }})</i>{% endif %}</span>
-    <span title="ambiguity band: a mode with s[V_S] inside it is flagged as borderline (?). {{ 'The paper’s range (95 % bootstrap interval of τ_SB).' if p.thresholds.ambiguity_from == 'paper' else 'τ_SB ± δ.' }}">
+    <span title="ambiguity band τ_SB ± δ (δ = {{ '%g'|format(p.thresholds.delta) }}): a mode with s[V_S] inside it is flagged as borderline (?).">
       ambiguous {{ "%.2f"|format(p.thresholds.ambiguity_range[0]) }}–{{ "%.2f"|format(p.thresholds.ambiguity_range[1]) }}</span>
     <span title="How the frame for the T/R scores was chosen ({{ p.frame.rule }} rule): {{ p.frame.step }}">
       frame <b>{{ "symmetry" if p.frame.rule == "symmetry" else "eigh" }}</b>{% if p.frame.kind %} · {{ p.frame.kind }}{% endif %}</span>
@@ -43,14 +43,13 @@
   <span class="bk">settings</span>
   <label title="Stretch/bend cut on s[V_S]: at or above is S, below is B. Calibrated value {{ '%.2f'|format(p.thresholds.tau_SB_calibrated) }}.">
     τ<sub>SB</sub> <input type="number" name="tau_sb" id="s-tau" min="0" max="1" step="0.01"
-      value="{{ '%g'|format(p.thresholds.tau_SB) }}"></label>
-  <label title="Blank: the paper's ambiguity range {{ '%.2f'|format(defaults.ambiguity_range[0]) }}–{{ '%.2f'|format(defaults.ambiguity_range[1]) }}. A number: the band becomes τ_SB ± δ. Modes inside it are flagged as borderline.">
+      value="{{ '%g'|format(p.thresholds.tau_SB) }}" data-default="{{ '%g'|format(defaults.tau_SB) }}"></label>
+  <label title="Modes with s[V_S] within δ of τ_SB are flagged as borderline. Default {{ '%g'|format(defaults.delta) }}.">
     δ <input type="number" name="delta" id="s-delta" min="0" max="1" step="0.01"
-      {% if p.thresholds.delta is not none %}value="{{ '%g'|format(p.thresholds.delta) }}"{% endif %}
-      placeholder="none"> <span class="muted">blank: range {{ '%.2f'|format(defaults.ambiguity_range[0]) }}–{{ '%.2f'|format(defaults.ambiguity_range[1]) }}</span></label>
+      value="{{ '%g'|format(p.thresholds.delta) }}" data-default="{{ '%g'|format(defaults.delta) }}"></label>
   <label title="Modes whose {{ 'eigenvalues' if p.is_emit else 'frequencies' }} agree to within this are grouped as one degenerate set.">
     degeneracy tol <input type="number" name="deg_tol" id="s-tol" min="0" step="any"
-      value="{{ '%g'|format(p.thresholds.deg_tol) }}">{% if not p.is_emit %} cm⁻¹{% endif %}</label>
+      value="{{ '%g'|format(p.thresholds.deg_tol) }}" data-default="{{ '%g'|format(defaults.deg_tol) }}">{% if not p.is_emit %} cm⁻¹{% endif %}</label>
   {% if p.mode_set == "arbitrary" %}
   <input type="hidden" name="mode" value="paste">
   <textarea name="pasted" hidden>{{ vsc_text }}</textarea>
@@ -61,16 +60,19 @@
   <input type="hidden" name="source" value="{{ p.source }}">
   {% set f = p.frame %}
   {% include "_frame_fields.html" %}
+  <div class="settings-actions">
+  <span class="muted push-left">{% if p.degeneracy_checked %}{{ p.degenerate_sets|length }} degenerate set{{ "" if p.degenerate_sets|length == 1 else "s" }}{% else %}degeneracy not checked — {{ 'eigenvalues' if p.is_emit else 'frequencies' }} missing{% endif %}</span>
   {% for r in p.rejected %}
   <label class="rej" title="Rejected as a T/R mode, so its slot went to the next-best mode. Untick and re-score to restore it.">
-    <input type="checkbox" name="reject" value="{{ r.number }}" checked> {{ r.name }} rejected</label>
+    <input type="checkbox" name="reject" value="{{ r.number }}" checked data-default="0"> {{ r.name }} rejected</label>
   {% endfor %}
   {% if too_big %}
   <span class="muted" title="Re-scoring posts this input back to the server, and it is over the host's request limit. Run the app locally to change settings on an input this size.">re-score unavailable here: input over {{ "%.1f"|format(request_cap / 1e6) }} MB</span>
   {% else %}
+  <button type="button" class="mini" data-reset title="Put every setting in this box back to its default and untick any rejections; then press re-score">reset all settings to defaults</button>
   <button type="submit" class="mini">re-score</button>
   {% endif %}
-  <span class="muted">{% if p.degeneracy_checked %}{{ p.degenerate_sets|length }} degenerate set{{ "" if p.degenerate_sets|length == 1 else "s" }}{% else %}degeneracy not checked — {{ 'eigenvalues' if p.is_emit else 'frequencies' }} missing{% endif %}</span>
+  </div>
 </form>
 
 <div class="bonds-strip">
@@ -103,7 +105,7 @@
       <td class="next" title="Ranked by |{{ c.slot }}| alone: {% for k in c.ranking %}{{ k.name }} {{ '%.3f'|format(k.related_score) }}{{ ', ' if not loop.last }}{% endfor %}{% if c.also_moves %}. Rejecting {{ c.name }} also moves: {% for mv in c.also_moves %}{{ mv.slot }} {{ mv.from }} → {{ mv.to }}{{ ', ' if not loop.last }}{% endfor %}{% endif %}">
         {% if c.runner_up %}{{ c.runner_up.name }} <span class="muted">{{ "%.3f"|format(c.runner_up.related_score) }}</span>{% if c.also_moves %} <span class="muted">+{{ c.also_moves|length }} moved</span>{% endif %}{% else %}—{% endif %}
       </td>
-      <td class="c"><input type="checkbox" class="rej-pick" name="reject" value="{{ c.number }}" form="rescore"></td>
+      <td class="c"><input type="checkbox" class="rej-pick" name="reject" value="{{ c.number }}" form="rescore" data-default="0"></td>
     </tr>
     {% endfor %}
   </table>
@@ -180,8 +182,7 @@
     <p class="legend">
       A <b class="amb">?</b> after a label means the mode's s[V<sub>S</sub>]
       lies in the ambiguity band {{ "%.2f"|format(p.thresholds.ambiguity_range[0]) }}–{{ "%.2f"|format(p.thresholds.ambiguity_range[1]) }}
-      {% if p.thresholds.ambiguity_from == "paper" %}(the paper's 95 % bootstrap
-      interval of τ<sub>SB</sub>){% else %}(τ<sub>SB</sub> ± δ){% endif %}: the
+      (τ<sub>SB</sub> ± δ, δ = {{ "%g"|format(p.thresholds.delta) }}): the
       letter follows the cut at τ<sub>SB</sub> = {{ "%.2f"|format(p.thresholds.tau_SB) }},
       but the score barely clears it, so read it as borderline.
       {% if p.degenerate_sets %}A <span class="deg">d1</span> tag marks a member

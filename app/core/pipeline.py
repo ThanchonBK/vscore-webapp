@@ -126,9 +126,8 @@ def analyse(atoms, coords, bonds, modes, title="", source="", warnings=None,
             supplied alongside it.
 
     ``tau_sb`` overrides the calibrated S/B cut point (None keeps it).
-    ``delta`` sets the interpretability band to tau_SB +/- delta; None uses the
-    paper's ambiguity range (AMBIGUITY_RANGE). A mode inside it is flagged as
-    borderline. ``deg_tol`` groups
+    ``delta`` sets the interpretability band to tau_SB +/- delta (None =
+    DEFAULT_DELTA, 0.10). A mode inside it is flagged as borderline. ``deg_tol`` groups
     modes whose frequency/eigenvalue agree to within it as one degenerate set;
     every mode must carry one for that check to run. ``reject`` lists 1-based
     numbers of the user's modes that may NOT take a T/R slot -- the assignment
@@ -317,24 +316,16 @@ def analyse(atoms, coords, bonds, modes, title="", source="", warnings=None,
     # move them: the label still follows the cut, the flag says not to lean
     # on it. Constructed references are rigid-body motions, never S/B.
     tau = thresholds.tau_SB
-    tau_overridden = thresholds.tau_SB != tau_sb_calibrated
-    if delta is None and tau_overridden:
-        # The paper's range is the bootstrap spread of the CALIBRATED tau_SB;
-        # around any other cut it would flag modes nowhere near the cut. Fall
-        # back to a symmetric band around the user's tau and say so.
-        delta = DEFAULT_DELTA
-        notes.append(
-            f"τ_SB was set to {tau:.2f}, so the paper's ambiguity range "
-            f"({AMBIGUITY_RANGE[0]:.2f}–{AMBIGUITY_RANGE[1]:.2f}, which belongs to "
-            f"the calibrated {tau_sb_calibrated:.2f}) does not apply; borderline "
-            f"modes are flagged within δ = {DEFAULT_DELTA:.2f} of {tau:.2f} instead.")
+    # The band is always tau_SB +/- delta, delta defaulting to 0.10 (Than,
+    # 2026-11-16). NOTE: around tau_SB = 0.43 that is 0.33-0.53, while the
+    # paper's ambiguity range is 0.32-0.53 (AMBIGUITY_RANGE, kept for
+    # reference): adamantane Vib 42 (0.3275) and C4H4 Vib 3 (0.3287) fall in
+    # the paper's range but not in the default band.
     if delta is None:
-        amb_lo, amb_hi = AMBIGUITY_RANGE
-        band = (f"the ambiguity range {amb_lo:.2f}–{amb_hi:.2f} (95 % bootstrap "
-                "interval of τ_SB)")
-    else:
-        amb_lo, amb_hi = tau - delta, tau + delta
-        band = f"δ = {delta:.2f} of τ_SB = {tau:.2f}"
+        delta = DEFAULT_DELTA
+    amb_lo, amb_hi = tau - delta, tau + delta
+    band = (f"δ = {delta:.2f} of τ_SB = {tau:.2f} "
+            f"({max(amb_lo, 0):.2f}–{min(amb_hi, 1):.2f})")
     for i, r in enumerate(rows):
         v = float(scored[i]["V"])
         # The label compares s[V_S] ROUNDED half up to 0.01 with tau_SB
@@ -530,7 +521,6 @@ def analyse(atoms, coords, bonds, modes, title="", source="", warnings=None,
             "tau_SB_overridden": thresholds.tau_SB != tau_sb_calibrated,
             "delta": delta,
             "ambiguity_range": [round(amb_lo, 4), round(amb_hi, 4)],
-            "ambiguity_from": "paper" if delta is None else "delta",
             "deg_tol": deg_tol,
             "v_weighting": thresholds.v_weighting,
         },

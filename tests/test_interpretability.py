@@ -83,25 +83,32 @@ def test_benzene_borderline_modes_match_the_reviewer():
     p = _run("C6H6")
     amb = {r["name"]: r["scores"]["V_S"] for r in p["vibrations"] if r["sb_ambiguous"]}
     assert set(amb) == {"Vib 13", "Vib 14", "Vib 16"}
-    # no delta given -> the paper's ambiguity range (95 % bootstrap interval)
-    assert p["thresholds"]["ambiguity_range"] == [0.32, 0.53]
-    assert p["thresholds"]["ambiguity_from"] == "paper"
-    assert any("ambiguity range 0.32–0.53" in w for w in p["warnings"])
+    # no delta given -> the default delta 0.10 around tau_SB 0.43
+    assert p["thresholds"]["delta"] == 0.10
+    assert p["thresholds"]["ambiguity_range"] == [0.33, 0.53]
+    assert any("δ = 0.10 of τ_SB = 0.43 (0.33–0.53)" in w for w in p["warnings"])
     # the pair is degenerate AND borderline -> its own warning
     deg = [w for w in p["warnings"] if "degenerate set" in w]
     assert len(deg) == 1, "one combined warning, not one box per set"
     assert "d5 (Vib 13, Vib 14" in deg[0]
 
 
-def test_a_delta_replaces_the_paper_range():
-    p = _run("C6H6", delta=0.05)
-    assert p["thresholds"]["ambiguity_from"] == "delta"
-    lo, hi = p["thresholds"]["ambiguity_range"]
-    assert (lo, hi) == (round(p["thresholds"]["tau_SB"] - 0.05, 4),
-                        round(p["thresholds"]["tau_SB"] + 0.05, 4))
-    for r in p["vibrations"]:
-        assert r["sb_ambiguous"] == (lo - 1e-9 <= r["scores"]["V_S"] <= hi + 1e-9) or \
-            abs(r["scores"]["V_S"] - lo) < 1e-3 or abs(r["scores"]["V_S"] - hi) < 1e-3
+def test_band_is_tau_plus_minus_delta():
+    for kw, (lo, hi) in (({}, (0.33, 0.53)), ({"delta": 0.05}, (0.38, 0.48)),
+                         ({"tau_sb": 0.5, "delta": 0.2}, (0.3, 0.7))):
+        p = _run("C6H6", **kw)
+        assert p["thresholds"]["ambiguity_range"] == [lo, hi], kw
+        for r in p["vibrations"]:
+            assert r["sb_ambiguous"] == (lo - 1e-9 <= r["scores"]["V_S"] <= hi + 1e-9) \
+                or min(abs(r["scores"]["V_S"] - lo), abs(r["scores"]["V_S"] - hi)) < 1e-4
+
+
+def test_default_band_differs_from_the_paper_range_on_purpose():
+    """Default delta 0.10 gives 0.33-0.53; the paper's range is 0.32-0.53.
+    Adamantane Vib 42 (0.3275) is the example case: borderline in the paper's
+    range, not in the default band. Pinned so a change of mind is deliberate."""
+    r = next(r for r in _run("C10H16")["vibrations"] if r["name"] == "Vib 42")
+    assert 0.32 <= r["scores"]["V_S"] < 0.33 and not r["sb_ambiguous"]
 
 
 def test_delta_zero_flags_nothing():
@@ -326,12 +333,9 @@ def test_margin_sign_agrees_with_the_label_everywhere():
     assert r["label"] == "S" and r["sb_margin"] == 0.0
 
 
-def test_paper_range_is_not_used_around_someone_elses_tau():
+def test_band_follows_a_users_tau():
     p = _run("C6H6", tau_sb=0.8)
     assert p["thresholds"]["ambiguity_range"] == [0.7, 0.9]
-    assert any("does not apply" in n for n in p["notes"])
-    # with the calibrated tau the paper's range stands
-    assert _run("C6H6")["thresholds"]["ambiguity_range"] == [0.32, 0.53]
 
 
 def test_emit_degeneracy_note_says_eigenvalues():
