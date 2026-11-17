@@ -544,7 +544,6 @@ td.hot {
   margin:10px 0; padding:8px 12px; background:var(--surface);
   border:1px solid var(--line); border-radius:6px; font-size:13px; }
 .settings label { display:inline-flex; align-items:center; gap:6px; white-space:nowrap; }
-.settings input[name=delta] { width:7.5em !important; }
 .settings input[type=number] { width:5.5em; font:inherit; padding:2px 4px;
   background:var(--bg); color:var(--ink); border:1px solid var(--line); border-radius:4px; }
 .settings .rej { color:var(--B); }

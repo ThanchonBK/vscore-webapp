@@ -156,7 +156,7 @@
             placeholder="{{ '%g'|format(defaults.tau_SB) }}"></label>
         <label title="Blank: modes with s[V_S] in the paper's ambiguity range ({{ '%.2f'|format(defaults.ambiguity_range[0]) }}–{{ '%.2f'|format(defaults.ambiguity_range[1]) }}) are flagged as borderline. A number: the band becomes τ_SB ± δ instead.">
           δ <input type="number" name="delta" min="0" max="1" step="0.01"
-            placeholder="{{ '%.2f'|format(defaults.ambiguity_range[0]) }}–{{ '%.2f'|format(defaults.ambiguity_range[1]) }}"></label>
+            placeholder="none"> <span class="muted">blank: range {{ '%.2f'|format(defaults.ambiguity_range[0]) }}–{{ '%.2f'|format(defaults.ambiguity_range[1]) }}</span></label>
         <label title="Modes whose frequencies (or EMIT eigenvalues) agree to within this form one degenerate set. Blank = default.">
           degeneracy tol <input type="number" name="deg_tol" min="0" step="any"
             placeholder="{{ '%g'|format(defaults.deg_tol) }}"></label>
