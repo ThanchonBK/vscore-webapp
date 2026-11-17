@@ -31,6 +31,26 @@
    * the table, the viewer caption, the compare panel and the chips can never
    * disagree about which view is showing. */
   function labOf(r)   { return useExt ? r.ext_label : r.label; }
+  /* Borderline: s[V_S] within delta of tau_SB (pipeline.py). Only means
+   * something on a stretch/bend label -- a slot name is not cut from V_S. */
+  function ambOf(r)   { return !!r.sb_ambiguous && ["S", "B", "SB"].indexOf(labOf(r)) !== -1; }
+  function ambMark(r) {
+    if (!ambOf(r)) return "";
+    var T = P.thresholds || {};
+    var rng = T.ambiguity_range || [];
+    var band = rng.length === 2
+      ? rng[0].toFixed(2) + "\u2013" + rng[1].toFixed(2) : "the ambiguity band";
+    return '<sup class="amb" title="s[V_S] = ' + r.scores.V_S.toFixed(3) +
+           ' lies in ' + band + ' around \u03c4_SB = ' + T.tau_SB +
+           ': borderline, not interpretable on its own">?</sup>';
+  }
+  function degMark(r) {
+    if (!r.degenerate_set) return "";
+    var ds = (P.degenerate_sets || [])[r.degenerate_set - 1];
+    return ' <span class="deg" title="degenerate set ' + r.degenerate_set +
+           (ds ? ": " + ds.names : "") + ' \u2014 individual scores depend on an' +
+           ' arbitrary choice within the set">d' + r.degenerate_set + "</span>";
+  }
   function labTxt(r)  { return useExt ? r.ext_label_text : r.label_text; }
   function hotOf(r)   { return useExt ? r.ext_highlights : r.highlights; }
   var BOND_HL = "#f2c14e";
@@ -61,7 +81,9 @@
     // A reference mode is displayed with a dash, not 0.00 -- it is constructed,
     // not a solution of the Hessian -- so it must sort as missing too, or it
     // lands among the lowest frequencies.
-    if (key === "freq") return r.is_reference ? null : r.frequency;
+    // Only a CONSTRUCTED mode lacks a real frequency. A 3N T/R winner is a
+    // reference too, but its eigenvalue/frequency is genuine data.
+    if (key === "freq") return r.constructed ? null : r.frequency;
     if (key === "label") return labOf(r);
     if (key === "irrep") return r.irrep;
     return r.scores[key];
@@ -209,7 +231,7 @@
     // range says nothing about them -- applying it would silently hide them
     // whenever the low bound is above 0, which is every real molecule. Their
     // visibility is governed solely by the "T/R reference modes" checkbox.
-    if (!r.is_reference && r.frequency !== null) {
+    if (!r.constructed && r.frequency !== null) {
       var lo = parseFloat(document.getElementById("f-lo").value);
       var hi = parseFloat(document.getElementById("f-hi").value);
       if (!isNaN(lo) && r.frequency < lo) return false;
@@ -217,7 +239,10 @@
     }
     var lab = labOf(r);
     if (["S", "B", "SB"].indexOf(lab) !== -1) {
-      return document.getElementById("f-" + lab).checked;
+      // Only S and B have a filter box: the binary scheme never produces SB.
+      // A label with no box is shown rather than dereferenced.
+      var box = document.getElementById("f-" + lab);
+      return box ? box.checked : true;
     }
     return true;                       // external labels are not label-filtered
   }
@@ -241,12 +266,12 @@
       var on = picked.indexOf(r.index) !== -1;
       var cells = '<td class="c"><input type="checkbox" class="pick"' +
                   (on ? " checked" : "") + ' data-i="' + r.index + '"></td>' +
-                  '<td class="mode">' + r.name + "</td>" +
+                  '<td class="mode">' + r.name + degMark(r) + "</td>" +
                   // A reference mode has no frequency -- it is a constructed
                   // ideal motion, not a solution of the Hessian -- so show a
                   // dash rather than a misleading 0.00 cm-1.
-                  '<td class="n' + (r.is_reference ? " dim" : "") + '">' +
-                  (r.is_reference || r.frequency === null
+                  '<td class="n' + (r.constructed ? " dim" : "") + '">' +
+                  (r.constructed || r.frequency === null
                      ? "—" : r.frequency.toFixed(2)) + "</td>";
       KEYS.forEach(function (k) {
         var cls = "n";
@@ -262,7 +287,7 @@
         cells += '<td class="' + cls + '">' + fmt(r.scores[k]) + "</td>";
       });
       var lb = labOf(r);
-      cells += '<td><b class="lab ' + lb + '">' + lb + "</b></td>" +
+      cells += '<td><b class="lab ' + lb + '">' + lb + "</b>" + ambMark(r) + "</td>" +
                "<td>" + (r.irrep || "—") + "</td>";
       tr.innerHTML = cells;
 
@@ -338,7 +363,7 @@
       h += "</tr>";
     });
     h += "<tr><td>label</td>";
-    rows.forEach(function (r) { h += "<td>" + labOf(r) + "</td>"; });
+    rows.forEach(function (r) { h += "<td>" + labOf(r) + (ambOf(r) ? "?" : "") + "</td>"; });
     h += "</tr><tr><td>" + (P.is_emit ? "eigenvalue" : "ν / cm⁻¹") + "</td>";
     rows.forEach(function (r) {
       h += "<td>" + (r.frequency === null ? "—" : r.frequency.toFixed(2)) + "</td>";
@@ -565,9 +590,10 @@
     });
     document.getElementById("vtitle").textContent =
       r.name + (r.frequency !== null && r.frequency !== 0
-                ? "  ·  " + r.frequency.toFixed(1) + " cm⁻¹" : "");
+                // an EMIT eigenvalue is not a wavenumber -- no unit
+                ? "  ·  " + r.frequency.toFixed(1) + (P.is_emit ? "" : " cm⁻¹") : "");
     var lb = document.getElementById("vlabel");
-    lb.textContent = labOf(r) + " — " + labTxt(r);
+    lb.textContent = labOf(r) + " — " + labTxt(r) + (ambOf(r) ? " (borderline)" : "");
     lb.className = "lab " + labOf(r).replace("*", "x");
 
     renderBondPanel(r);
@@ -891,7 +917,7 @@
     });
   });
 
-  ["f-S", "f-B", "f-SB", "f-ref"].forEach(function (id) {
+  ["f-S", "f-B", "f-ref"].forEach(function (id) {
     var el = document.getElementById(id);
     if (el) el.addEventListener("change", render);   // f-ref absent under 3N
   });
@@ -909,7 +935,7 @@
       var r = selected === null ? null : byIndex(selected);
       if (r) {                                  // repaint the viewer caption
         var lb = document.getElementById("vlabel");
-        lb.textContent = labOf(r) + " \u2014 " + labTxt(r);
+        lb.textContent = labOf(r) + " \u2014 " + labTxt(r) + (ambOf(r) ? " (borderline)" : "");
         lb.className = "lab " + labOf(r).replace("*", "x");
       }
       if (picked.length >= 2) renderCompare();  // and the compare tables
@@ -919,7 +945,10 @@
   /* Clicking a candidate row selects that mode in the table and viewer, so the
    * two tables are navigable as one. */
   document.querySelectorAll("#cands tr[data-mode]").forEach(function (tr) {
-    tr.addEventListener("click", function () {
+    tr.addEventListener("click", function (e) {
+      // the reject tick is a form control, not a request to look at the mode
+      if (e && e.target && e.target.classList &&
+          e.target.classList.contains("rej-pick")) return;
       var r = byIndex(parseInt(tr.dataset.mode, 10));
       if (r) { show(r); revealViewer(); }
     });
@@ -933,13 +962,13 @@
     renderCompare();
   });
   document.getElementById("all").addEventListener("click", function () {
-    ["f-S", "f-B", "f-SB"].forEach(function (i) { document.getElementById(i).checked = true; });
+    ["f-S", "f-B"].forEach(function (i) { document.getElementById(i).checked = true; });
     document.getElementById("f-lo").value = Math.floor(P.freq_range[0]);
     document.getElementById("f-hi").value = Math.ceil(P.freq_range[1]);
     render();
   });
   document.getElementById("none").addEventListener("click", function () {
-    ["f-S", "f-B", "f-SB"].forEach(function (i) { document.getElementById(i).checked = false; });
+    ["f-S", "f-B"].forEach(function (i) { document.getElementById(i).checked = false; });
     render();
   });
   ["amp", "frm", "arrows", "play", "bonds", "axes", "labels"].forEach(function (id) {

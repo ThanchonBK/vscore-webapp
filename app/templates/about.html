@@ -113,6 +113,19 @@
     not, and are only meaningful in this frame. The 3D viewer shows that same
     frame.
   </p>
+  <p>
+    For a symmetric top, a spherical top or a linear molecule the principal
+    axes are not unique &mdash; the perpendicular axes can turn freely &mdash; so
+    by default the frame is fixed by the <b>symmetry rule</b>: z on the
+    C<sub>n</sub> axis and y through an atom of the smallest set of
+    symmetry-equivalent off-axis atoms (spherical tops: three perpendicular
+    C<sub>2</sub> axes; linear molecules: the turn about the axis from the
+    modes' in-plane displacement), with a tie-break on the modes' translation
+    scores and a naming convention for signs. The same input then gives the same
+    T/R scores in any orientation. The submitted version's frame (inertia
+    eigenvectors, which leave those axes arbitrary) can still be chosen under
+    <b>Settings</b>, along with keeping the input frame where the rule allows it.
+  </p>
 
   <h2>Scope</h2>
   <p>

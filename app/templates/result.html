@@ -11,16 +11,21 @@
     <span>{{ "linear" if p.linear else "non-linear" }}</span>
     <span title="V-score bond weighting">w = <b>{{ p.thresholds.v_weighting }}</b></span>
     <span title="single stretch/bend cut point on s[V_S]: at or above is S, below is B">
-      τ<sub>SB</sub> {{ "%.2f"|format(p.thresholds.tau_SB) }}</span>
+      τ<sub>SB</sub> {{ "%.2f"|format(p.thresholds.tau_SB) }}{% if p.thresholds.tau_SB_overridden %}
+      <i class="muted">(calibrated {{ "%.2f"|format(p.thresholds.tau_SB_calibrated) }})</i>{% endif %}</span>
+    <span title="ambiguity band: a mode with s[V_S] inside it is flagged as borderline (?). {{ 'The paper’s range (95 % bootstrap interval of τ_SB).' if p.thresholds.ambiguity_from == 'paper' else 'τ_SB ± δ.' }}">
+      ambiguous {{ "%.2f"|format(p.thresholds.ambiguity_range[0]) }}–{{ "%.2f"|format(p.thresholds.ambiguity_range[1]) }}</span>
+    <span title="How the frame for the T/R scores was chosen ({{ p.frame.rule }} rule): {{ p.frame.step }}">
+      frame <b>{{ "symmetry" if p.frame.rule == "symmetry" else "eigh" }}</b>{% if p.frame.kind %} · {{ p.frame.kind }}{% endif %}</span>
     <span title="displacement decimal places">{{ p.precision_dp }} dp</span>
     <span title="Detected from the mode count. 3N = the complete set, so the six external modes were found among yours. 3N-6 (3N-5 linear) = vibrations only, so the ideal T/R references were constructed and added.">
       {% if p.mode_set == "3n" %}<b>3N</b> set{% else %}<b>3N&minus;{{ 3 * p.n_atoms - p.n_modes }}</b> set{% endif %}</span>
     <span title="The molecule is rotated into its principal axes of inertia before scoring — that is the frame s[Tx]…s[Rz] are defined in, and the frame the viewer draws. This is how far it was turned from the orientation in your file.">
-      frame <b>{{ "%.0f"|format(p.frame_rotation_deg) }}&deg;</b> from input</span>
+      turned <b>{{ "%.0f"|format(p.frame_rotation_deg) }}&deg;</b> from input</span>
   </div>
   <div class="dl">
     <button type="button" data-dl="csv">scores.csv</button>
-    <button type="button" data-dl="csvall">+ references</button>
+    {% if p.references %}<button type="button" data-dl="csvall">+ references</button>{% endif %}
     <button type="button" data-dl="vsc">{{ p.title }}.vsc</button>
     <a href="/">new file</a>
   </div>
@@ -32,6 +37,41 @@
 {% for n in p.notes %}
 <div class="info">{{ n }}</div>
 {% endfor %}
+
+{% set too_big = request_cap and (vsc_text|length) > request_cap %}
+<form class="settings" id="rescore" method="post" action="/score" enctype="multipart/form-data">
+  <span class="bk">settings</span>
+  <label title="Stretch/bend cut on s[V_S]: at or above is S, below is B. Calibrated value {{ '%.2f'|format(p.thresholds.tau_SB_calibrated) }}.">
+    τ<sub>SB</sub> <input type="number" name="tau_sb" id="s-tau" min="0" max="1" step="0.01"
+      value="{{ '%g'|format(p.thresholds.tau_SB) }}"></label>
+  <label title="Blank: the paper's ambiguity range {{ '%.2f'|format(defaults.ambiguity_range[0]) }}–{{ '%.2f'|format(defaults.ambiguity_range[1]) }}. A number: the band becomes τ_SB ± δ. Modes inside it are flagged as borderline.">
+    δ <input type="number" name="delta" id="s-delta" min="0" max="1" step="0.01"
+      {% if p.thresholds.delta is not none %}value="{{ '%g'|format(p.thresholds.delta) }}"{% endif %}
+      placeholder="{{ '%.2f'|format(defaults.ambiguity_range[0]) }}–{{ '%.2f'|format(defaults.ambiguity_range[1]) }}"></label>
+  <label title="Modes whose {{ 'eigenvalues' if p.is_emit else 'frequencies' }} agree to within this are grouped as one degenerate set.">
+    degeneracy tol <input type="number" name="deg_tol" id="s-tol" min="0" step="any"
+      value="{{ '%g'|format(p.thresholds.deg_tol) }}">{% if not p.is_emit %} cm⁻¹{% endif %}</label>
+  {% if p.mode_set == "arbitrary" %}
+  <input type="hidden" name="mode" value="paste">
+  <textarea name="pasted" hidden>{{ vsc_text }}</textarea>
+  {% else %}
+  <input type="hidden" name="mode" value="vsc">
+  <textarea name="vsctext" hidden>{{ vsc_text }}</textarea>
+  {% endif %}
+  <input type="hidden" name="source" value="{{ p.source }}">
+  {% set f = p.frame %}
+  {% include "_frame_fields.html" %}
+  {% for r in p.rejected %}
+  <label class="rej" title="Rejected as a T/R mode, so its slot went to the next-best mode. Untick and re-score to restore it.">
+    <input type="checkbox" name="reject" value="{{ r.number }}" checked> {{ r.name }} rejected</label>
+  {% endfor %}
+  {% if too_big %}
+  <span class="muted" title="Re-scoring posts this input back to the server, and it is over the host's request limit. Run the app locally to change settings on an input this size.">re-score unavailable here: input over {{ "%.1f"|format(request_cap / 1e6) }} MB</span>
+  {% else %}
+  <button type="submit" class="mini">re-score</button>
+  {% endif %}
+  <span class="muted">{% if p.degeneracy_checked %}{{ p.degenerate_sets|length }} degenerate set{{ "" if p.degenerate_sets|length == 1 else "s" }}{% else %}degeneracy not checked — {{ 'eigenvalues' if p.is_emit else 'frequencies' }} missing{% endif %}</span>
+</form>
 
 <div class="bonds-strip">
   <span class="bk">connectivity used</span>
@@ -49,7 +89,9 @@
       there are none, and these are modes carrying the most T/R character.</span>
   </div>
   <table>
-    <tr><th>mode</th><th>slot</th><th title="The mode's own score in that slot's column: how much it looks like that motion, not how likely it is to be one">related score</th></tr>
+    <tr><th>mode</th><th>slot</th><th title="The mode's own score in that slot's column: how much it looks like that motion, not how likely it is to be one">related score</th>
+      <th title="The mode that takes this slot if this one is rejected: the one-to-one assignment re-solved without it">next in line</th>
+      <th class="c" title="Tick to reject this mode for its slot, then re-score: the slot goes to the next in line">reject</th></tr>
     {% for c in p.candidates %}
     <tr data-mode="{{ c.mode_index }}">
       <td class="mode">{{ c.name }}</td>
@@ -58,9 +100,16 @@
         <span class="cbar"><i style="width:{{ (c.related_score * 100)|round(1) }}%"></i></span>
         {{ "%.3f"|format(c.related_score) }}
       </td>
+      <td class="next" title="Ranked by |{{ c.slot }}| alone: {% for k in c.ranking %}{{ k.name }} {{ '%.3f'|format(k.related_score) }}{{ ', ' if not loop.last }}{% endfor %}{% if c.also_moves %}. Rejecting {{ c.name }} also moves: {% for mv in c.also_moves %}{{ mv.slot }} {{ mv.from }} → {{ mv.to }}{{ ', ' if not loop.last }}{% endfor %}{% endif %}">
+        {% if c.runner_up %}{{ c.runner_up.name }} <span class="muted">{{ "%.3f"|format(c.runner_up.related_score) }}</span>{% if c.also_moves %} <span class="muted">+{{ c.also_moves|length }} moved</span>{% endif %}{% else %}—{% endif %}
+      </td>
+      <td class="c"><input type="checkbox" class="rej-pick" name="reject" value="{{ c.number }}" form="rescore"></td>
     </tr>
     {% endfor %}
   </table>
+  <p class="muted cnote">Don't want a pick? Tick <b>reject</b> and press
+    <b>re-score</b> above: the slot goes to the next mode in line, and the
+    rejected one is labelled from its own s[V<sub>S</sub>].</p>
   <label class="acc">
     <input type="checkbox" id="use-ext">
     Treat these as real T/R modes and fold them into the table
@@ -76,7 +125,6 @@
     <div class="filters">
       <label class="f"><input type="checkbox" id="f-S" checked><b class="lab S">S</b></label>
       <label class="f"><input type="checkbox" id="f-B" checked><b class="lab B">B</b></label>
-      <label class="f"><input type="checkbox" id="f-SB" checked><b class="lab SB">SB</b></label>
       <span class="sep"></span>
       {# floor/ceil, never round: round() can move a bound PAST the extreme mode
          it is supposed to include -- HCOOH's lowest is 610.92, which rounds to
@@ -128,6 +176,18 @@
       them there to fold them in, and each then highlights its own slot's
       score instead of V_S.{% endif %}
       Click any row to animate it, or tick its <b>cmp</b> box.
+    </p>
+    <p class="legend">
+      A <b class="amb">?</b> after a label means the mode's s[V<sub>S</sub>]
+      lies in the ambiguity band {{ "%.2f"|format(p.thresholds.ambiguity_range[0]) }}–{{ "%.2f"|format(p.thresholds.ambiguity_range[1]) }}
+      {% if p.thresholds.ambiguity_from == "paper" %}(the paper's 95 % bootstrap
+      interval of τ<sub>SB</sub>){% else %}(τ<sub>SB</sub> ± δ){% endif %}: the
+      letter follows the cut at τ<sub>SB</sub> = {{ "%.2f"|format(p.thresholds.tau_SB) }},
+      but the score barely clears it, so read it as borderline.
+      {% if p.degenerate_sets %}A <span class="deg">d1</span> tag marks a member
+      of a degenerate set: any orthogonal mix of the set's modes is equally
+      valid, so its members' individual scores depend on an arbitrary choice and
+      only the set as a whole is well defined.{% endif %}
     </p>
     <p class="legend">
       <b>Comparing modes.</b> Tick <b>cmp</b> on two or three rows and a panel

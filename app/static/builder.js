@@ -111,7 +111,7 @@
       h.appendChild(el("b", null, "mode " + m));
       var f = num("");
       f.className = "freq";
-      f.placeholder = "freq / cm⁻¹ (optional)";
+      f.placeholder = "freq / cm⁻¹ (for degeneracy check)";
       f.step = "any";
       h.appendChild(f);
       box.appendChild(h);

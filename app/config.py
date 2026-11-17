@@ -56,6 +56,13 @@ SCORE_KEYS = ("Tx", "Ty", "Tz", "Rx", "Ry", "Rz", "V_S")
 # gives a message that names the fix; the platform's own rejection does not.
 MAX_UPLOAD_BYTES = 4_000_000
 
+# Vercel also caps the WHOLE request body (~4.5 MB) and rejects anything larger
+# before the app runs, with a platform error page that says nothing useful. The
+# per-file cap above cannot catch two files that are each under it, so the
+# pages check the total in the browser before submitting. Local runs have no
+# platform cap. A little headroom is left for the multipart framing.
+REQUEST_CAP_BYTES = None if IS_LOCAL else 4_400_000
+
 SITE_NOTE = (
     "Scores are computed by the reference implementation verbatim: elements, "
     "geometry, displacements and an explicit bond list in, seven scores and a "

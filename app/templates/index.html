@@ -19,7 +19,9 @@
     separately as T/R candidates, yours to accept or ignore.
   </p>
 
-  <form method="post" action="/score" enctype="multipart/form-data" id="form">
+  <div class="err" id="too-big" hidden></div>
+  <form method="post" action="/score" enctype="multipart/form-data" id="form"
+        {% if request_cap %}data-cap="{{ request_cap }}"{% endif %}>
     <div class="tabs" role="tablist">
       <button type="button" class="tab on" data-mode="log" role="tab">Gaussian .log + .com</button>
       <button type="button" class="tab" data-mode="qc" role="tab">ORCA / Molden + bonds</button>
@@ -146,6 +148,33 @@
     </section>
     {% endif %}
 
+    <details class="opts">
+      <summary>Settings — τ<sub>SB</sub>, ambiguity band, degeneracy, frame of reference</summary>
+      <div class="settings">
+        <label title="Stretch/bend cut on s[V_S]: at or above is S, below is B. Blank = calibrated value.">
+          τ<sub>SB</sub> <input type="number" name="tau_sb" min="0" max="1" step="0.01"
+            placeholder="{{ '%g'|format(defaults.tau_SB) }}"></label>
+        <label title="Blank: modes with s[V_S] in the paper's ambiguity range ({{ '%.2f'|format(defaults.ambiguity_range[0]) }}–{{ '%.2f'|format(defaults.ambiguity_range[1]) }}) are flagged as borderline. A number: the band becomes τ_SB ± δ instead.">
+          δ <input type="number" name="delta" min="0" max="1" step="0.01"
+            placeholder="{{ '%.2f'|format(defaults.ambiguity_range[0]) }}–{{ '%.2f'|format(defaults.ambiguity_range[1]) }}"></label>
+        <label title="Modes whose frequencies (or EMIT eigenvalues) agree to within this form one degenerate set. Blank = default.">
+          degeneracy tol <input type="number" name="deg_tol" min="0" step="any"
+            placeholder="{{ '%g'|format(defaults.deg_tol) }}"></label>
+      </div>
+      {% set f = {"rule": "symmetry", "keep_input_frame": False, "tie_break": "tmax", "linear_turn": "vector", "sym_tol": None} %}
+      {% include "_frame_fields.html" %}
+      <p class="note">
+        A mode whose s[V<sub>S</sub>] lies in the ambiguity band still gets a
+        label, but is flagged as borderline; left blank, the band is the paper's
+        {{ '%.2f'|format(defaults.ambiguity_range[0]) }}–{{ '%.2f'|format(defaults.ambiguity_range[1]) }}.
+        Degenerate sets are found from the frequencies (eigenvalues for EMIT), so
+        every mode needs one for that check to run. The frame decides which of the
+        equally valid principal-axis frames of a symmetric top, spherical top or
+        linear molecule the T/R scores are taken in. Everything here can be
+        changed again on the result page.
+      </p>
+    </details>
+
     <button type="submit" class="go">Score modes</button>
   </form>
 
@@ -164,7 +193,8 @@
       <div>
         <h4>Never read</h4>
         <p class="muted">
-          Frequency (a row label — zeroing it changes nothing), reduced mass, force
+          Frequency never enters a score (zeroing it changes nothing) — it is
+          used only to find degenerate sets. Reduced mass, force
           constant, irrep, IR/Raman intensities, charge, multiplicity, basis set —
           and the Cartesian Hessian, which is the largest block in a VEDA
           <code>.fmt</code> and is not used at all.
@@ -184,6 +214,30 @@
       document.getElementById("mode").value = t.dataset.mode;
     });
   });
+  // The host caps the whole request body; two files each under the per-file
+  // limit can still exceed it, and the host's own rejection is an opaque
+  // error page. Check the total here, where the message can say what to do.
+  (function () {
+    var form = document.getElementById("form"), cap = parseInt(form.dataset.cap || "0", 10);
+    if (!cap) return;
+    form.addEventListener("submit", function (e) {
+      var total = 0;
+      form.querySelectorAll("input[type=file]").forEach(function (inp) {
+        for (var i = 0; i < inp.files.length; i++) total += inp.files[i].size;
+      });
+      form.querySelectorAll("textarea").forEach(function (t) { total += t.value.length; });
+      if (total > cap) {
+        e.preventDefault();
+        var box = document.getElementById("too-big");
+        box.innerHTML = "<strong>Too large to send.</strong><p>The selected files add up to " +
+          (total / 1e6).toFixed(1) + " MB, over this server's " + (cap / 1e6).toFixed(1) +
+          " MB request limit. Convert the output to a .vsc file locally with make_vsc.py " +
+          "(typically a few kB) and upload that instead, or clear files picked on other tabs.</p>";
+        box.hidden = false;
+        box.scrollIntoView({ block: "center" });
+      }
+    });
+  })();
   // Show the chosen filename in the drop zone.
   document.querySelectorAll(".drop input[type=file]").forEach(function (inp) {
     inp.addEventListener("change", function () {

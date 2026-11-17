@@ -1,0 +1,25 @@
+{# Frame-of-reference controls, shared by the upload form and the result page's
+   re-score form. Expects `f` (current choice) and `defaults` (from main.py).
+   The rule is scoring-functions src/frame.py (JCC revision, R1.5). #}
+<div class="settings frame-fields">
+  <span class="bk">frame</span>
+  <label title="Which principal-axis frame the T/R scores are taken in. For an asymmetric top both rules give the same axes; they differ for symmetric and spherical tops and linear molecules, whose axes can turn freely.">
+    rule <select name="frame_rule" id="s-frame">
+      <option value="symmetry"{% if f.rule == "symmetry" %} selected{% endif %}>symmetry rule (default)</option>
+      <option value="eigh"{% if f.rule == "eigh" %} selected{% endif %}>submitted version (inertia eigenvectors)</option>
+    </select></label>
+  <label title="Symmetry rule only: keep the orientation of your file (e.g. Gaussian's standard orientation) when it is one of the frames the rule allows.">
+    <input type="checkbox" name="keep_input_frame" value="1"{% if f.keep_input_frame %} checked{% endif %}> keep input frame if allowed</label>
+  <label title="Symmetry rule, step 2: among the allowed sets of axis lines, take the one with the largest in-plane T scores, each axis from a different mode (tmax), or the largest summed gap between each mode's two largest in-plane scores (gap).">
+    tie-break <select name="tie_break">
+      {% for t in defaults.tie_breaks %}<option value="{{ t }}"{% if f.tie_break == t %} selected{% endif %}>{{ t }}{% if t == "tmax" %} (default){% endif %}</option>{% endfor %}
+    </select></label>
+  <label title="Linear molecules: turn about the molecular axis from the modes' in-plane displacement sum (vector), or by a 0.1° rescoring scan (scan).">
+    linear turn <select name="linear_turn">
+      {% for t in defaults.linear_turns %}<option value="{{ t }}"{% if f.linear_turn == t %} selected{% endif %}>{{ t }}{% if t == "vector" %} (default){% endif %}</option>{% endfor %}
+    </select></label>
+  <label title="Atoms count as symmetry-equivalent within this distance (Å). Raise it for coordinates printed with fewer than 5 decimals.">
+    sym tol <input type="number" name="sym_tol" min="0" step="any"
+      {% if f.sym_tol is not none and f.sym_tol != defaults.sym_tol %}value="{{ '%g'|format(f.sym_tol) }}"{% endif %}
+      placeholder="{{ '%g'|format(defaults.sym_tol) }}"> Å</label>
+</div>

@@ -223,9 +223,11 @@ main { padding:20px 16px 0; }
 .what summary { cursor:pointer; color:var(--ink-2); font-size:13px; }
 .cols { display:grid; grid-template-columns:1fr 1fr; gap:26px; margin-top:16px; }
 @media (max-width:640px) { .cols { grid-template-columns:1fr; } }
-.mini { border-collapse:collapse; font-size:12.5px; width:100%; }
-.mini td { padding:4px 8px 4px 0; border-bottom:1px solid var(--line); color:var(--ink-2); }
-.mini td.y { color:var(--accent); font-family:var(--mono); text-align:right; }
+/* table.mini, not .mini: the small BUTTONS share the class name, and an
+   unscoped width:100% stretched every one of them across its container. */
+table.mini { border-collapse:collapse; font-size:12.5px; width:100%; }
+table.mini td { padding:4px 8px 4px 0; border-bottom:1px solid var(--line); color:var(--ink-2); }
+table.mini td.y { color:var(--accent); font-family:var(--mono); text-align:right; }
 
 .err, .warn {
   border-radius:6px; padding:12px 14px; margin:0 0 18px; font-size:13px;
@@ -277,7 +279,12 @@ main { padding:20px 16px 0; }
   max-width:1400px; margin:0 auto;
   display:grid; grid-template-columns:minmax(0,1fr) 480px; gap:14px; align-items:start;
 }
-@media (max-width:1250px) { .split { grid-template-columns:1fr; } }
+/* minmax(0,1fr), not 1fr: a 1fr track never shrinks below its content's
+   min-content width, so the full score table forced the whole PAGE to scroll
+   sideways on a phone (808 px in a 591 px viewport). min-width:0 lets the table
+   scroll inside its own panel instead. */
+@media (max-width:1250px) { .split { grid-template-columns:minmax(0,1fr); } }
+.split > * { min-width:0; }
 
 .tablewrap { background:var(--surface); border:1px solid var(--line); border-radius:6px; }
 .filters {
@@ -531,3 +538,26 @@ td.hot {
   cursor:pointer;
 }
 .cands .acc .muted { font-size:11.5px; }
+
+/* ---- settings bar, borderline + degeneracy marks (JCC rev. items 4/11) ---- */
+.settings { display:flex; flex-wrap:wrap; align-items:center; gap:8px 16px;
+  margin:10px 0; padding:8px 12px; background:var(--surface);
+  border:1px solid var(--line); border-radius:6px; font-size:13px; }
+.settings label { display:inline-flex; align-items:center; gap:6px; white-space:nowrap; }
+.settings input[name=delta] { width:7.5em !important; }
+.settings input[type=number] { width:5.5em; font:inherit; padding:2px 4px;
+  background:var(--bg); color:var(--ink); border:1px solid var(--line); border-radius:4px; }
+.settings .rej { color:var(--B); }
+sup.amb, b.amb { color:var(--hot-ink); background:var(--hot-bg); border-radius:3px;
+  padding:0 2px; font-weight:700; margin-left:1px; cursor:help; }
+.warn ul.dsets { margin:6px 0 0; padding-left:18px; }
+.warn ul.dsets li { margin:2px 0; }
+.deg { display:inline-block; font-size:10px; line-height:1; padding:2px 3px;
+  margin-left:3px; border-radius:3px; background:var(--SB-bg); color:var(--SB);
+  vertical-align:middle; cursor:help; }
+.cands td.next { white-space:nowrap; font-size:12px; }
+.cands .cnote { font-size:12px; margin:6px 0 0; }
+.opts { margin:14px 0 4px; }
+.opts summary { cursor:pointer; color:var(--ink-2); font-size:13px; }
+.settings .frame-fields { border:0; padding:0; margin:0; background:none; }
+.settings select { font:inherit; background:var(--bg); color:var(--ink); border:1px solid var(--line); border-radius:4px; }

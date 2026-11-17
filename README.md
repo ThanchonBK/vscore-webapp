@@ -130,12 +130,17 @@ EMIT basis is exactly that case. Benzene's 36 EMIT modes:
 
 | mode | slot | related score | if accepted |
 |---|---|---|---|
-| EMIT 34 | T_x | 1.000 | `Tx` |
-| EMIT 35 | T_y | 1.000 | `Ty` |
+| EMIT 35 | T_x | 1.000 | `Tx` |
+| EMIT 34 | T_y | 1.000 | `Ty` |
 | EMIT 36 | T_z | 1.000 | `Tz` |
-| EMIT 6 | R_x | 0.383 | `Rx` |
-| EMIT 9 | R_y | 0.215 | `Ry` |
+| EMIT 9 | R_x | 0.215 | `Rx` |
+| EMIT 6 | R_y | 0.383 | `Ry` |
 | EMIT 19 | R_z | 0.333 | `Rz` |
+
+(In the symmetry-rule frame, the default since the 2026-11 resync. EMIT 34/35
+and 6/9 are degenerate pairs, so which member lands on x and which on y is a
+property of the frame, not of the modes; the submitted version's frame had
+them the other way round.)
 
 The three translations are real; the three "rotations" are just the closest
 available match at 0.22–0.38, with nothing in the label itself to say how weak
@@ -214,6 +219,7 @@ app/
     scoring.py         ) verbatim from scoring-functions,
     classifier.py      ) import paths adjusted only
     utils.py           )
+    frame.py           ) principal-axis frame rule (R1.5)
     thresholds.json    ) calibrated τ_TR / τ_S / τ_B / τ_SB
     candidates.py      splits the classifier's one label into the two views
     parsers.py         .log / .com / .vsc readers + .vsc writer
@@ -232,8 +238,8 @@ Hungarian solver to save it would risk silently changing labels.
 
 ## The vendored scoring core
 
-`app/core/{scoring,classifier,utils}.py` and `app/core/thresholds.json` are
-copies of `../src/{scoring,classifier,utils}.py` and
+`app/core/{scoring,classifier,utils,frame}.py` and `app/core/thresholds.json` are
+copies of `../src/{scoring,classifier,utils,frame}.py` and
 `../data/results/thresholds.json`. They are duplicated rather than imported so
 that `api/index.py` is self-contained and deploys to a serverless function
 without bundling the whole repository.
@@ -249,13 +255,25 @@ src/classifier.py                         app/core/classifier.py
                  "thresholds.json")            __file__), "thresholds.json")
 ```
 
-`scoring.py`, `utils.py` and `thresholds.json` are byte-identical.
+`scoring.py`, `utils.py`, `frame.py` and `thresholds.json` are byte-identical
+(last synced to scoring-functions `aae410e`, 2026-11-16).
+
+Two things upstream keeps outside those files are mirrored by hand and must be
+re-checked on every resync:
+
+- `pipeline.analyse()` repeats the frame step of upstream
+  `main.build_scorer_and_final` (EMIT vectors returned to the input frame via
+  `mit_rotation_matrix()` first, then `frame.select_frame_for_scorer`). It
+  passes every frame option per call; frame.py's module-level `set_*` setters
+  are never used, since in a server they would leak between requests.
+- `pipeline.AMBIGUITY_RANGE` copies `src/figures.py`'s `AMBIGUITY_RANGE`
+  (0.32–0.53), because figures.py is not vendored.
 
 To re-sync after changing `src/`:
 
 ```bash
 # run from this repo's root, with scoring-functions checked out alongside it
-cp ../scoring-functions/src/{scoring,utils,classifier}.py app/core/
+cp ../scoring-functions/src/{scoring,utils,classifier,frame}.py app/core/
 cp ../scoring-functions/data/results/thresholds.json app/core/
 # classifier.py needs its two webapp adaptations re-applied by hand:
 #   `from src.scoring import` -> `from .scoring import`

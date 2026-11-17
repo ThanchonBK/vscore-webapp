@@ -204,7 +204,7 @@ class Thresholds:
         against the definition that produced it -- classify_all_modes() refuses
         a mismatch rather than silently mislabelling modes.
 
-    Defaults (0.95/0.9/0.2/0.42) are the provisional pre-calibration
+    Defaults (0.95/0.9/0.2/0.43) are the provisional pre-calibration
     constants, deliberately NOT auto-overwritten by Phase-3 calibration --
     use `Thresholds.calibrated()` for the calibrated values instead. tau_SB
     is a partial exception to that "provisional" framing: unlike tau_TR/
@@ -212,9 +212,12 @@ class Thresholds:
     calibration leaves it untouched -- see run_calibration_pipeline in
     src/calibrate.py), so THIS field default is the actual, sole source of
     truth for the canonical tau_SB value; there is no separate "calibrated"
-    tau_SB to defer to. Canonical value 0.42 (the all-molecules
-    classification-error-minimizing value from the tau_SB_error_sweep -- see
-    IMPLEMENTATION_PLAN.md's Recent history).
+    tau_SB to defer to. Canonical value 0.43: the midpoint of the
+    single-centre (SC) minimum-error plateau, between the highest-scoring SC
+    bend (SBr4 135 cm-1, s[V_S] 0.40706) and the lowest-scoring SC stretches
+    (OBr4 483 cm-1, 0.44422), (0.40706 + 0.44422)/2 = 0.4256, rounded to the
+    0.01 at which scores are reported. The test set is not used to choose it.
+    History: 0.50 -> 0.42 (2026-08-20) -> 0.43 (2026-11-11, JCC revision).
     tests/test_classifier.py pins `Thresholds()` explicitly so its regression
     goldens stay fixed even if thresholds.json is later recalibrated;
     calibrated behavior has its own tests (tests/test_calibrate.py).
@@ -222,7 +225,7 @@ class Thresholds:
     tau_TR: float = 0.95
     tau_S: float = 0.9
     tau_B: float = 0.2
-    tau_SB: float = 0.42
+    tau_SB: float = 0.43
     v_weighting: str = DEFAULT_V_WEIGHTING
 
     @classmethod
@@ -234,10 +237,10 @@ class Thresholds:
             # A thresholds.json written before the weighting variant existed
             # carries no stamp, and was by definition calibrated unweighted.
             # A thresholds.json written before tau_SB existed carries no such
-            # key either -- fall back to the class default (0.42) rather than
+            # key either -- fall back to the class default (0.43) rather than
             # KeyError.
             return cls(tau_TR=data["tau_TR"], tau_S=data["tau_S"], tau_B=data["tau_B"],
-                       tau_SB=data.get("tau_SB", 0.42),
+                       tau_SB=data.get("tau_SB", cls.tau_SB),
                        v_weighting=data.get("v_weighting", "none"))
         return cls()
 
@@ -257,7 +260,8 @@ class Thresholds:
 
 def is_linear(scorer, tol=LINEAR_TOL):
     """True if the smallest principal moment of inertia is ~0 (linear molecule).
-    Must be called post-MIT() (as build_scorer_and_final always does) -- see
+    The moments do not depend on the frame; build_scorer_and_final puts the
+    molecular axis on x (frame rule or MIT()) -- see
     main.py::build_scorer_and_final for the n_R=2 / Rx-placeholder invariant this feeds."""
     moments, _ = scorer.principal_axes()
     scale = max(float(np.max(np.abs(moments))), 1e-12)
@@ -274,10 +278,31 @@ def external_slots(scorer):
     return 3, len(r_slots), slots
 
 
+SCORE_DECIMALS = 2
+
+
+def round_score(v, ndigits=SCORE_DECIMALS):
+    """s[V_S] rounded HALF UP to `ndigits` decimals -- the precision at which
+    tau_SB is stated (0.43), so the S/B comparison uses the same precision on
+    both sides (authors, 2026-11-12). Only the comparison uses it: every
+    output CSV keeps the raw score. Scalar in -> float out; array in -> array.
+
+    Half up, not numpy's half-to-even; the 1e-9 guard absorbs binary
+    representation error (0.425 is stored as 0.42499999999999998...), so it
+    agrees with figures.round_half_up's Decimal(repr(x)) rounding for every
+    score not within 1e-11 of a rounding boundary.
+
+    Consequence: round_score(v) >= 0.43  <=>  v >= 0.425."""
+    q = 10.0 ** ndigits
+    r = np.floor(np.asarray(v, dtype=float) * q + 0.5 + 1e-9) / q
+    return float(r) if np.ndim(r) == 0 else r
+
+
 def vib_label_binary(v, tau_SB):
     """Binary-scheme Step-2 vibrational sub-classification from s[V_S]: forces
-    every mode to STRETCHING or BENDING via a single cutoff, never MIXED_STRETCH_BEND."""
-    return STRETCHING if v >= tau_SB else BENDING
+    every mode to STRETCHING or BENDING via a single cutoff, never MIXED_STRETCH_BEND.
+    The score is rounded to tau_SB's precision first (round_score)."""
+    return STRETCHING if round_score(v) >= tau_SB else BENDING
 
 
 def vib_label(v, thresholds, scheme="binary"):

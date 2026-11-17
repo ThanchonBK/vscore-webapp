@@ -212,7 +212,7 @@ def test_dom_stub_defaults_match_the_template():
     """
     tpl = (ROOT / "app/templates/result.html").read_text()
     stub = (JS / "dom_stub.js").read_text()
-    for control in ("f-ref", "f-S", "f-B", "f-SB", "arrows", "play"):
+    for control in ("f-ref", "f-S", "f-B", "arrows", "play"):
         checked_in_tpl = bool(re.search(
             r'id="%s"[^>]*\bchecked\b' % re.escape(control), tpl))
         m = re.search(r'get\("%s"\)\.checked\s*=\s*(true|false)'
@@ -1339,3 +1339,74 @@ def test_clicking_a_TR_candidate_also_scrolls_to_the_viewer(tmp_path):
     r = json.loads(got)
     assert r["rows"] > 0, "candidate rows must be reachable from the document"
     assert r["scrolled"] == 1
+
+
+def test_table_marks_borderline_and_degenerate_modes(tmp_path):
+    """Benzene: Vib 13/14 are a degenerate pair inside tau_SB +/- delta, Vib 16
+    is borderline alone, Vib 7 is degenerate only. The ? and d# marks must reach the
+    rendered table, and only on those rows."""
+    from app.core.parsers import parse_vsc
+    v = parse_vsc((ROOT / "examples" / "C6H6.vsc").read_text())
+    payload = analyse(v["atoms"], v["coords"], v["bonds"], v["modes"], title="C6H6")
+    _, got = _run_js("C6H6", tmp_path, """
+        var out = {};
+        document.querySelectorAll('#tbl tbody tr').forEach(function (tr) {
+            var name = ((tr.innerHTML.match(/<td class="mode">([^<]*)/) || [])[1] || "").trim();
+            out[name] = {amb: /class="amb"/.test(tr.innerHTML),
+                         deg: (tr.innerHTML.match(/class="deg"[^>]*>(d\\d+)</) || [])[1] || null};
+        });
+        print(JSON.stringify(out));
+    """, payload=payload)
+    r = json.loads(got)
+    assert r["Vib 13"] == {"amb": True, "deg": "d5"}
+    assert r["Vib 14"] == {"amb": True, "deg": "d5"}
+    assert r["Vib 16"] == {"amb": True, "deg": None}
+    assert r["Vib 7"] == {"amb": False, "deg": "d3"}
+    assert r["Vib 5"] == {"amb": False, "deg": None}
+    assert r["Vib 6"] == {"amb": False, "deg": None}
+
+
+def test_3n_tr_winners_keep_their_eigenvalue(tmp_path):
+    """On a complete 3N set the six T/R winners are references, but their
+    eigenvalue is real data from the file -- only CONSTRUCTED modes may show a
+    dash. Benzene EMIT: EMIT 19 (Rz winner) has eigen=-6.2678."""
+    from app.core.parsers import parse_vsc
+    v = parse_vsc((ROOT / "examples" / "C6H6_EMIT.vsc").read_text())
+    payload = analyse(v["atoms"], v["coords"], v["bonds"], v["modes"], title="C6H6_EMIT")
+    _, got = _run_js("C6H6", tmp_path, """
+        // the page's own default range; the stub's 0 would hide every
+        // negative EMIT eigenvalue
+        var P = JSON.parse(PAYLOAD_TXT), lo = document.getElementById('f-lo');
+        lo.value = String(Math.floor(P.freq_range[0])); lo.fire('input');
+        var out = {};
+        document.querySelectorAll('#tbl tbody tr').forEach(function (tr) {
+            var name = ((tr.innerHTML.match(/<td class="mode">([^<]*)/) || [])[1] || "").trim();
+            out[name] = (tr.innerHTML.match(/<\\/td><td class="n[^"]*">([^<]*)<\\/td>/) || [])[1];
+        });
+        print(JSON.stringify(out));
+    """, payload=payload)
+    r = json.loads(got)
+    assert len(r) == 36
+    assert r["EMIT 19"] == "-6.27"
+    assert "—" not in r.values()
+
+
+def test_borderline_tooltip_names_the_band_actually_used(tmp_path):
+    """With no delta given, the band is the paper's range; the tooltip read
+    'within δ = null' because it printed thresholds.delta."""
+    from app.core.parsers import parse_vsc
+    v = parse_vsc((ROOT / "examples" / "C6H6.vsc").read_text())
+    payload = analyse(v["atoms"], v["coords"], v["bonds"], v["modes"], title="C6H6")
+    _, got = _run_js("C6H6", tmp_path, """
+        var t = [];
+        document.querySelectorAll('#tbl tbody tr').forEach(function (tr) {
+            var m = tr.innerHTML.match(/class="amb" title="([^"]*)"/);
+            if (m) t.push(m[1]);
+        });
+        print(JSON.stringify(t));
+    """, payload=payload)
+    titles = json.loads(got)
+    assert titles, "no borderline marks rendered"
+    for t in titles:
+        assert "null" not in t and "undefined" not in t, t
+        assert "0.32–0.53" in t, t

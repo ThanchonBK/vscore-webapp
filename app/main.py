@@ -22,12 +22,28 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from .config import (ALLOW_PASTE, IS_LOCAL, MAX_UPLOAD_BYTES, SCORE_KEYS, SITE_NOTE,
+from .config import (ALLOW_PASTE, IS_LOCAL, MAX_UPLOAD_BYTES, REQUEST_CAP_BYTES,
+                     SCORE_KEYS, SITE_NOTE,
                      STATIC_DIR, TEMPLATES_DIR, VERSION, asset_version)
 from .core.parsers import (ParseError, parse_bond_file, parse_connectivity,
                            parse_frequency_file, parse_gaussian_log, parse_vsc,
                            write_vsc)
-from .core.pipeline import analyse, to_csv_rows
+from .core.classifier import Thresholds
+from .core import frame as frame_mod
+from .core.pipeline import (AMBIGUITY_RANGE, DEFAULT_DEG_TOL, DEFAULT_DELTA,
+                            FRAME_RULES, LINEAR_TURNS, TIE_BREAKS, analyse,
+                            to_csv_rows)
+
+# Starlette caps each NON-file form field at 1 MB (MultiPartParser.max_part_size,
+# a class attribute FastAPI never overrides). The result page re-posts its own
+# .vsc as a text field and the builder posts typed modes the same way, so any
+# input between 1 MB and the 4 MB upload cap scored fine once and then failed
+# to re-score with a bare JSON 400. Align the two caps.
+from starlette.formparsers import MultiPartParser  # noqa: E402
+MultiPartParser.max_part_size = MAX_UPLOAD_BYTES
+
+# modes x atoms above which the linear 'scan' turn is refused on the deployment.
+SCAN_WORK_CAP = 1000
 
 app = FastAPI(
     title="Vibrational Mode Scorer",
@@ -44,6 +60,17 @@ templates.env.globals["is_local"] = IS_LOCAL
 templates.env.globals["allow_paste"] = ALLOW_PASTE
 templates.env.globals["site_note"] = SITE_NOTE
 templates.env.globals["score_keys"] = SCORE_KEYS
+templates.env.globals["request_cap"] = REQUEST_CAP_BYTES
+templates.env.globals["defaults"] = {
+    "tau_SB": Thresholds.calibrated().tau_SB,
+    "delta": DEFAULT_DELTA,
+    "deg_tol": DEFAULT_DEG_TOL,
+    "ambiguity_range": AMBIGUITY_RANGE,
+    "sym_tol": frame_mod.SYM_TOL,
+    "frame_rules": FRAME_RULES,
+    "tie_breaks": TIE_BREAKS,
+    "linear_turns": LINEAR_TURNS,
+}
 
 
 # ----------------------------------------------------------------------
@@ -76,7 +103,8 @@ async def _read(upload: UploadFile | None, what: str) -> str | None:
 
 def _build(mode, log_text, com_text, vsc_text, log_name, com_name, vsc_name,
            pasted=None, arb_text=None, arb_name=None,
-           qc_text=None, qc_name=None, bond_text=None, bond_name=None):
+           qc_text=None, qc_name=None, bond_text=None, bond_name=None,
+           opts=None, source=None):
     """Route the three input paths onto one payload.
 
     Returns ``(payload, raw)``. ``raw`` keeps the geometry and displacements
@@ -86,7 +114,13 @@ def _build(mode, log_text, com_text, vsc_text, log_name, com_name, vsc_name,
     coordinates sum negative, so re-aligning an already-aligned geometry can
     flip axes and invert the T/R scores. Writing the original frame means a
     downloaded .vsc re-scores to the same numbers as the files it came from.
+
+    ``opts`` carries the user's analysis options (tau_sb, delta, deg_tol,
+    reject) straight through to ``analyse``. ``source`` overrides the
+    provenance line -- a re-score posts the page's own .vsc back, and should
+    still say which files it came from.
     """
+    opts = opts or {}
     if mode == "paste":
         if not ALLOW_PASTE:
             raise ParseError(
@@ -107,18 +141,20 @@ def _build(mode, log_text, com_text, vsc_text, log_name, com_name, vsc_name,
                "bonds": v["bonds"], "modes": v["modes"]}
         return analyse(v["atoms"], v["coords"], v["bonds"], v["modes"],
                        title=v["title"] or "arbitrary modes",
-                       source=(arb_name or "typed in"),
-                       mode_set="arbitrary"), raw
+                       source=source or (arb_name or "typed in"),
+                       mode_set="arbitrary", **opts), raw
 
     if mode == "vsc":
         if not vsc_text:
             raise ParseError("No .vsc file was uploaded.")
+        if len(vsc_text) > MAX_UPLOAD_BYTES:
+            raise ParseError("That .vsc is too large to post as text; upload it as a file.")
         v = parse_vsc(vsc_text)
         raw = {"atoms": v["atoms"], "coords": v["coords"],
                "bonds": v["bonds"], "modes": v["modes"]}
         payload = analyse(v["atoms"], v["coords"], v["bonds"], v["modes"],
                           title=v["title"] or _stem(vsc_name),
-                          source=vsc_name or "uploaded .vsc")
+                          source=source or vsc_name or "uploaded .vsc", **opts)
         return payload, raw
 
     if mode == "qc":
@@ -135,7 +171,7 @@ def _build(mode, log_text, com_text, vsc_text, log_name, com_name, vsc_name,
                "bonds": bonds, "modes": g["modes"]}
         payload = analyse(g["atoms"], g["coords"], bonds, g["modes"],
                           title=_stem(qc_name),
-                          source=f"{qc_name} + {bond_name}")
+                          source=source or f"{qc_name} + {bond_name}", **opts)
         return payload, raw
 
     if not log_text:
@@ -153,8 +189,51 @@ def _build(mode, log_text, com_text, vsc_text, log_name, com_name, vsc_name,
     # out at a stationary point. Detection confirms that rather than assuming it.
     payload = analyse(g["atoms"], g["coords"], bonds, g["modes"],
                       title=_stem(log_name),
-                      source=f"{log_name} + {com_name}")
+                      source=source or f"{log_name} + {com_name}", **opts)
     return payload, raw
+
+
+def _options(tau_sb, delta, deg_tol, reject, frame_rule="", keep_input_frame="",
+             tie_break="", linear_turn="", sym_tol=""):
+    """Form strings -> analyse() keyword arguments. Blank means default.
+
+    ``reject`` arrives either as repeated form fields (the result page's
+    checkboxes) or as one comma/space-separated string (the JSON API).
+    """
+    def num(v):
+        v = (v or "").strip()
+        if not v:
+            return None
+        try:
+            return float(v)
+        except ValueError:
+            raise ParseError(f"{v!r} is not a number.")
+    opts = {}
+    if num(tau_sb) is not None:
+        opts["tau_sb"] = num(tau_sb)
+    if num(delta) is not None:
+        opts["delta"] = num(delta)
+    if num(deg_tol) is not None:
+        opts["deg_tol"] = num(deg_tol)
+    nums = []
+    for item in reject or []:
+        nums.extend(x for x in str(item).replace(",", " ").split() if x)
+    if nums:
+        opts["reject"] = nums
+    # Frame of reference (src/frame.py upstream). Choices are validated by
+    # analyse(), which says what the allowed values are.
+    for key, val in (("frame_rule", frame_rule), ("tie_break", tie_break),
+                     ("linear_turn", linear_turn)):
+        if (val or "").strip():
+            opts[key] = val.strip()
+    if (keep_input_frame or "").strip().lower() in ("1", "on", "true", "yes"):
+        opts["keep_input_frame"] = True
+    if num(sym_tol) is not None:
+        opts["sym_tol"] = num(sym_tol)
+    if not IS_LOCAL:
+        # ~4 s of rescoring on a serverless function; see analyse()'s docstring.
+        opts["max_scan_work"] = SCAN_WORK_CAP
+    return opts
 
 
 def _stem(name):
@@ -207,13 +286,24 @@ async def score(
     arbfile: UploadFile | None = File(None),
     qcfile: UploadFile | None = File(None),
     bondfile: UploadFile | None = File(None),
+    vsctext: str = Form(""),
+    source: str = Form(""),
+    tau_sb: str = Form(""),
+    delta: str = Form(""),
+    deg_tol: str = Form(""),
+    reject: list[str] = Form([]),
+    frame_rule: str = Form(""),
+    keep_input_frame: str = Form(""),
+    tie_break: str = Form(""),
+    linear_turn: str = Form(""),
+    sym_tol: str = Form(""),
 ):
     try:
         payload, raw = _build(
             mode,
             await _read(logfile, "The Gaussian output file"),
             await _read(comfile, "The input deck"),
-            await _read(vscfile, "The .vsc file"),
+            await _read(vscfile, "The .vsc file") or (vsctext if vsctext.strip() else None),
             logfile.filename if logfile else None,
             comfile.filename if comfile else None,
             vscfile.filename if vscfile else None,
@@ -224,6 +314,9 @@ async def score(
             qc_name=qcfile.filename if qcfile else None,
             bond_text=await _read(bondfile, "The bond file"),
             bond_name=bondfile.filename if bondfile else None,
+            opts=_options(tau_sb, delta, deg_tol, reject, frame_rule,
+                          keep_input_frame, tie_break, linear_turn, sym_tol),
+            source=source.strip() or None,
         )
     except ParseError as exc:
         return templates.TemplateResponse(
@@ -235,6 +328,10 @@ async def score(
 
     return templates.TemplateResponse(request, "result.html", {
         "p": payload,
+        # The page's own input, posted back by the settings form to re-score
+        # with different thresholds or rejected candidates -- no state is kept
+        # server-side, so the input travels with the page.
+        "vsc_text": _vsc_text(payload, raw),
         "payload_json": _embed(payload),
         # Both views are shipped so the download follows the toggle without a
         # round trip. The .vsc has no view: it serialises the INPUT (geometry,
@@ -289,13 +386,24 @@ async def api_score(
     arbfile: UploadFile | None = File(None),
     qcfile: UploadFile | None = File(None),
     bondfile: UploadFile | None = File(None),
+    vsctext: str = Form(""),
+    source: str = Form(""),
+    tau_sb: str = Form(""),
+    delta: str = Form(""),
+    deg_tol: str = Form(""),
+    reject: list[str] = Form([]),
+    frame_rule: str = Form(""),
+    keep_input_frame: str = Form(""),
+    tie_break: str = Form(""),
+    linear_turn: str = Form(""),
+    sym_tol: str = Form(""),
 ):
     try:
         payload, _raw = _build(
             mode,
             await _read(logfile, "The Gaussian output file"),
             await _read(comfile, "The input deck"),
-            await _read(vscfile, "The .vsc file"),
+            await _read(vscfile, "The .vsc file") or (vsctext if vsctext.strip() else None),
             logfile.filename if logfile else None,
             comfile.filename if comfile else None,
             vscfile.filename if vscfile else None,
@@ -306,6 +414,9 @@ async def api_score(
             qc_name=qcfile.filename if qcfile else None,
             bond_text=await _read(bondfile, "The bond file"),
             bond_name=bondfile.filename if bondfile else None,
+            opts=_options(tau_sb, delta, deg_tol, reject, frame_rule,
+                          keep_input_frame, tie_break, linear_turn, sym_tol),
+            source=source.strip() or None,
         )
     except ParseError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
